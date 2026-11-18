@@ -787,6 +787,50 @@ TEST_CASE("Remaster ground tint colours the bounce without changing its brightne
     CHECK(plain.groundTint.empty());
 }
 
+// The ground cover's town mask: built-up ground around buildings, open land
+// elsewhere (TerrainHorizonMap::groundBuilt).
+TEST_CASE("Remaster built ground is full near a building and open far from it", "[Graphics][remaster]")
+{
+    const int n = 32;
+    const float cell = 12.5f;
+    const std::vector<float> h(static_cast<size_t>(n) * n, 10.0f);
+    TerrainHorizonOptions opt;
+    opt.threads = 1;
+    TerrainHorizonMap map;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, map));
+    REQUIRE(map.size == n);
+    CHECK(map.groundBuilt.empty());
+
+    // One house of 8 m radius at (200, 100): x east, z north.
+    const float spots[] = {200.0f, 100.0f, 8.0f};
+    MarkBuiltGround(map, spots, 1);
+    REQUIRE(map.groundBuilt.size() == static_cast<size_t>(n) * n);
+    auto at = [&map, n](int x, int z) { return map.groundBuilt[static_cast<size_t>(z) * n + x]; };
+    // The texel on the house, and one 25 m off (inside radius + kBuiltClear).
+    CHECK(at(16, 8) == 1.0f);
+    CHECK(at(18, 8) == 1.0f);
+    // 37.5 m off: 4.5 m into the 20 m fade.
+    CHECK(at(19, 8) == Catch::Approx(1.0f - 4.5f / kBuiltFade));
+    // 62.5 m off: beyond radius + clear + fade (53 m).
+    CHECK(at(21, 8) == 0.0f);
+    CHECK(at(16, 13) == 0.0f);
+    // x and z are not swapped.
+    CHECK(at(8, 16) == 0.0f);
+    for (float v : map.groundBuilt)
+    {
+        CHECK(v >= 0.0f);
+        CHECK(v <= 1.0f);
+    }
+
+    // No buildings: all open. An invalid map is left alone.
+    MarkBuiltGround(map, nullptr, 0);
+    REQUIRE(map.groundBuilt.size() == static_cast<size_t>(n) * n);
+    CHECK(at(16, 8) == 0.0f);
+    TerrainHorizonMap none;
+    MarkBuiltGround(none, spots, 1);
+    CHECK(none.groundBuilt.empty());
+}
+
 TEST_CASE("Remaster cloud noise is uniform, so a threshold sets the covered fraction exactly", "[Graphics][remaster]")
 {
     const int n = 128;
@@ -1029,6 +1073,10 @@ std::vector<std::string> RemasterPrograms()
     for (int ps = 0; ps < kShaderIds; ++ps)
         if (const char* main = gl::RemasterFragmentMain(ps))
             out.push_back(std::string(gl::RemasterFragmentCommon()) + main);
+    // The stock water main, when the sea flow (on by default) has taken its
+    // place: it still draws with POSEIDON_XP_SEAFLOW=0.
+    if (std::string(gl::RemasterFragmentMain(3)) != gl::RemasterWaterMainStock())
+        out.push_back(std::string(gl::RemasterFragmentCommon()) + gl::RemasterWaterMainStock());
     return out;
 }
 
@@ -1077,6 +1125,13 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     }
     CHECK(vertex == 3);   // VSScreen, VSTransform, VSShadow
     CHECK(fragment == 4); // PSNormal, PSDetail, PSGrass, PSWater
+    {
+        // The stock water main (POSEIDON_XP_SEAFLOW=0) compiles too.
+        std::string log;
+        const bool ok = Compiles(common + gl::RemasterWaterMainStock(), EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+    }
 
     int post = 0;
     for (int i = 0; i < static_cast<int>(gl::PostShader::Count); ++i)
@@ -1100,8 +1155,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // its blur, the surfaces' horizon occlusion and its accumulation
     // over frames, the photoreal camera's meter, and the volumetric fog's
     // injection, integration, near field, apply, horizon ring and night glow,
-    // and the far slice's depth put-back (a far-drawn unit's frames)
-    CHECK(post == 36);
+    // the far slice's depth put-back (a far-drawn unit's frames)
+    // and the EX9-WEAK upsampling TAA resolve (POSEIDON_XP_RENDERSCALE)
+    CHECK(post == 37);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1308,6 +1364,26 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
     REQUIRE(screen != nullptr);
     CHECK(Joined(vsNames, RawStringsOf("EngineGL33_LightingShaders")) == screen);
     CHECK(CountOf(screen, gl::LitConstantsBlock()) == 1);
+}
+
+TEST_CASE("Volumetric clouds experiment shaders compile under glslang", "[Graphics][Shaders][remaster]")
+{
+    // POSEIDON_XP_CLOUDS (EngineGL33_XpClouds.cpp): the march (with the
+    // LitConstants block) and the resolve, as the engine assembles them.
+    GlslangInit init;
+    int n = 0;
+    for (int i = 0; gl::XpCloudsShaderSource(i); ++i)
+    {
+        CAPTURE(i);
+        std::string log;
+        const bool ok = Compiles(gl::XpCloudsShaderSource(i), EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+        ++n;
+    }
+    CHECK(n == 3);
+    CHECK(CountOf(gl::XpCloudsShaderSource(0), gl::LitConstantsBlock()) == 1);
+    CHECK(CountOf(gl::XpCloudsShaderSource(2), gl::LitConstantsBlock()) == 1);
 }
 
 TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][remaster]")
@@ -1569,6 +1645,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litCameraLook", LC::CameraLook, 1},
         {"litWater2", LC::Water2, 1},
         {"litXpNight", LC::XpNight, 1},
+        {"litXpClouds", LC::XpClouds, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1666,7 +1743,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Water2) == static_cast<int>(LC::CameraLook) + 1);
     // The experiment xp-nightlight's slot follows the experimental water slot.
     CHECK(static_cast<int>(LC::XpNight) == static_cast<int>(LC::Water2) + 1);
-    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpNight) + 1);
+    // The experiment xp-clouds' slot follows it.
+    CHECK(static_cast<int>(LC::XpClouds) == static_cast<int>(LC::XpNight) + 1);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpClouds) + 1);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1690,7 +1769,8 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
         CAPTURE(s.name, s.unit);
         CHECK(s.unit >= 2);
         CHECK(s.unit != 7);
-        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers")));
+        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers") ||
+               (s.unit == gl::kXpCloudsUnit && std::string(s.name) == "xpClouds")));
         CHECK(units.insert(s.unit).second);
         CHECK(names.insert(s.name).second);
     }
@@ -1856,7 +1936,9 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
 TEST_CASE("Remaster sea: the water program is the variant C model on the shared pieces",
           "[Graphics][Shaders][remaster][SeaWaves]")
 {
-    const std::string water = gl::RemasterFragmentMain(3); // PSWater
+    // PSWater's stock main (the sea flow, on by default, builds on it; it draws
+    // alone with POSEIDON_XP_SEAFLOW=0).
+    const std::string water = gl::RemasterWaterMainStock();
     REQUIRE_FALSE(water.empty());
     // The next animation frame on its own unit, from the one unit table.
     bool row = false;

@@ -1447,8 +1447,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
                     if (GScene->GetObjectShadows() || GScene->GetVehicleShadows())
                     {
 #define SHADOW_BORDER 2
-                        xMin -= SHADOW_BORDER, xMax += SHADOW_BORDER;
-                        zMin -= SHADOW_BORDER, zMax += SHADOW_BORDER;
+                        // POSEIDON_XP_SHADOWKEEP: as far out as a low sun's shadows reach
+                        const int shadowBorder =
+                            _scene.ShadowKeepOn() ? _scene.ShadowKeepBorder(ObjGrid) : SHADOW_BORDER;
+                        xMin -= shadowBorder, xMax += shadowBorder;
+                        zMin -= shadowBorder, zMax += shadowBorder;
                     }
                     if (xMin < 0)
                     {
@@ -1499,6 +1502,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
                             const Camera& cam = *GScene->GetCamera();
 #if RECT_CLIPPERS
                             ClipFlags andClip = cam.IsClipped(bCenter, bRadius, 1);
+                            // POSEIDON_XP_SHADOWKEEP: a cell outside the screen whose
+                            // objects can cast into view is walked like a cell in view
+                            if (andClip && _scene.ShadowKeepOn() && _scene.ShadowKeepCell(bCenter, bRadius))
+                            {
+                                andClip = ClipNone;
+                            }
                             if (andClip && list->GetNonStaticCount() <= 0)
                             {
                                 continue;
@@ -1587,6 +1596,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 // effects (cinema borders, cutscene overlays) draw over it
                 // untouched. The call below is then a no-op.
                 GEngine->EndWorldScene();
+                // POSEIDON_XP_RAIN=late: the rain overlay over the finished
+                // frame, after the TAA resolve (nothing otherwise).
+                _scene.DrawRainLate();
                 if (_cameraEffect)
                 {
                     _cameraEffect->Draw();

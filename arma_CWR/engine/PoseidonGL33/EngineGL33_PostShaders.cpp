@@ -941,6 +941,149 @@ void main() {
 }
 )";
 
+// EX9-WEAK (plan Q-4, POSEIDON_XP_RENDERSCALE): the TAA resolve upsampling a
+// world drawn below the window into a window-sized history. The inputs are
+// the resolve's (curTex, depthTex, worldTex, opaqueTex at the world's size;
+// screen is the window's, the history's); per window pixel:
+//   - the world texel whose jittered sample lies nearest the pixel centre
+//     (texel q holds the scene at q + 0.5 - jitter, in world pixels) and its
+//     3x3: this frame rebuilt at the centre with the resolve's Gaussian,
+//     exp(-4 d^2) over the distance in window pixels, so the result keeps the
+//     window's detail as the samples of 16 jitters gather in the history;
+//   - this frame's share falls with the nearest sample's distance (its
+//     weight, 1 when a sample sits on the centre): pixels this frame sampled
+//     badly lean on the history;
+//   - reprojection, the disocclusion test, the Catmull-Rom history read, the
+//     colour clip, the particle mask and the luma weights as in the resolve,
+//     the neighbourhood and the depth from the world's 3x3, the history's
+//     test and read in window pixels.
+static const char s_psPostTaaUpMain[] = R"(
+uniform vec4 srcSize;  // xy the world's size (pixels), zw 1/size
+uniform vec4 upParams; // x the Gaussian's coefficient over window pixels (4), y the floor of this frame's share (0.3)
+vec3 toYCoCg(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
+vec3 fromYCoCg(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
+
+vec3 clipToBox(vec3 bmin, vec3 bmax, vec3 q) {
+    vec3 c = 0.5 * (bmax + bmin);
+    vec3 e = 0.5 * (bmax - bmin) + 1e-4;
+    vec3 v = q - c;
+    vec3 a = abs(v / e);
+    float m = max(a.x, max(a.y, a.z));
+    return m > 1.0 ? c + v / m : q;
+}
+
+// Catmull-Rom from nine bilinear taps (window pixels).
+vec3 sampleHistory(vec2 uv) {
+    vec2 sp = uv * screen.xy;
+    vec2 t1 = floor(sp - 0.5) + 0.5;
+    vec2 f = sp - t1;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 t0 = (t1 - 1.0) * screen.zw;
+    vec2 t3 = (t1 + 2.0) * screen.zw;
+    vec2 t12 = (t1 + w2 / w12) * screen.zw;
+    vec3 r = texture(histTex, vec2(t0.x, t0.y)).rgb * w0.x * w0.y;
+    r += texture(histTex, vec2(t12.x, t0.y)).rgb * w12.x * w0.y;
+    r += texture(histTex, vec2(t3.x, t0.y)).rgb * w3.x * w0.y;
+    r += texture(histTex, vec2(t0.x, t12.y)).rgb * w0.x * w12.y;
+    r += texture(histTex, vec2(t12.x, t12.y)).rgb * w12.x * w12.y;
+    r += texture(histTex, vec2(t3.x, t12.y)).rgb * w3.x * w12.y;
+    r += texture(histTex, vec2(t0.x, t3.y)).rgb * w0.x * w3.y;
+    r += texture(histTex, vec2(t12.x, t3.y)).rgb * w12.x * w3.y;
+    r += texture(histTex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;
+    return max(r, vec3(0.0));
+}
+
+float viewDepth(float d) { return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x); }
+
+void main() {
+    ivec2 ip = ivec2(gl_FragCoord.xy);
+    ivec2 dlim = ivec2(screen.xy) - 1;
+    ivec2 slim = ivec2(srcSize.xy) - 1;
+    vec2 uv = (vec2(ip) + 0.5) * screen.zw;
+    vec2 sp = uv * srcSize.xy;          // the pixel centre in world pixels
+    float toWin = screen.x * srcSize.z; // window pixels per world pixel
+    ivec2 ib = clamp(ivec2(floor(sp + jitter.xy)), ivec2(0), slim);
+    vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+    vec3 cmin = vec3(1e9), cmax = vec3(-1e9);
+    vec3 cur = vec3(0.0);
+    float wsum = 0.0;
+    float wmax = 0.0;
+    float closest = 2.0;
+    ivec2 closestOff = ivec2(0);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 q = clamp(ib + ivec2(x, y), ivec2(0), slim);
+            vec3 c = texelFetch(curTex, q, 0).rgb;
+            vec3 yc = toYCoCg(c);
+            m1 += yc;
+            m2 += yc * yc;
+            cmin = min(cmin, yc);
+            cmax = max(cmax, yc);
+            vec2 d = (vec2(q) + 0.5 - jitter.xy - sp) * toWin;
+            float w = exp(-upParams.x * dot(d, d));
+            cur += c * w;
+            wsum += w;
+            wmax = max(wmax, w);
+            float dz = texelFetch(depthTex, q, 0).r;
+            if (dz < closest) { closest = dz; closestOff = q - ib; }
+        }
+    }
+    cur /= max(wsum, 1e-6);
+
+    // Where the surface at the nearest neighbour was one frame ago.
+    vec2 uvU = (vec2(ib + closestOff) + 0.5 - jitter.xy) * srcSize.zw;
+    vec2 ndc = (uvU - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    float z = viewDepth(closest);
+    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
+    vec3 pp = vec3(dot(reproj0.xyz, p) + reproj0.w, dot(reproj1.xyz, p) + reproj1.w, dot(reproj2.xyz, p) + reproj2.w);
+    vec2 prevNdc = pp.xy * prevProj.xy / max(pp.z, 1e-6);
+    vec2 motion = worldRect.xy + (prevNdc * 0.5 + 0.5) * worldRect.zw - uvU;
+    vec2 histUV = uv + motion;
+    bool valid = jitter.z > 0.5 && pp.z > 0.0 && all(greaterThanEqual(histUV, worldRect.xy)) &&
+                 all(lessThanEqual(histUV, worldRect.xy + worldRect.zw));
+
+    if (valid && closest < 0.999999) {
+        ivec2 hq = ivec2(floor(histUV * screen.xy));
+        float zmin = 1e9, zmax = 0.0;
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                float zq = texelFetch(histTex, clamp(hq + ivec2(x, y), ivec2(0), dlim), 0).a;
+                zmin = min(zmin, zq);
+                zmax = max(zmax, zq);
+            }
+        }
+        float tol = 0.03 * pp.z + 0.15;
+        valid = pp.z >= zmin - tol && pp.z <= zmax + tol;
+    }
+
+    vec3 mu = m1 / 9.0;
+    vec3 sigma = sqrt(max(m2 / 9.0 - mu * mu, vec3(0.0)));
+    vec3 hist = valid ? sampleHistory(histUV) : cur;
+    hist = fromYCoCg(clipToBox(max(mu - sigma, cmin), min(mu + sigma, cmax), toYCoCg(hist)));
+
+    // This frame's share, lower where its nearest sample lies off the centre.
+    float alpha = valid ? jitter.w * mix(upParams.y, 1.0, wmax) : 1.0;
+    alpha = min(alpha + 0.1 * clamp(length(motion * screen.xy) / 8.0, 0.0, 1.0), 1.0);
+    float r = 0.0;
+    if (reactive.w > 0.5) {
+        vec3 dw = abs(texelFetch(worldTex, ib, 0).rgb - texelFetch(opaqueTex, ib, 0).rgb);
+        r = smoothstep(reactive.x, reactive.y, max(dw.r, max(dw.g, dw.b)));
+        alpha = max(alpha, r * reactive.z);
+    }
+    float lc = dot(cur, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - r);
+    float lh = dot(hist, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - r);
+    float wc = alpha / (1.0 + lc);
+    float wh = (1.0 - alpha) / (1.0 + lh);
+    vec3 res = (cur * wc + hist * wh) / max(wc + wh, 1e-5);
+    float d0 = texelFetch(depthTex, ib, 0).r;
+    fragColor = vec4(max(res, vec3(0.0)), min(viewDepth(d0), 65000.0));
+}
+)";
+
 // TAA sharpen (the Sharpen stage): the resolved frame back into the frame
 // target, every sample, with a bounded unsharp mask against the softness of
 // the accumulation (its overshoot stays within a quarter of the local cross's
@@ -1085,6 +1228,7 @@ const PostShaderDef kPostShaders[] = {
      {Poseidon::gl33lighting::kPostFogGlowGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
       Poseidon::gl33lighting::kPostFogGlowMainGLSL}},
     {"psPostFarDepth", {s_psPostFarDepthGLSL}},
+    {"psPostTaaUp", {s_psPostTaaInputs, s_psPostTaaUpMain}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

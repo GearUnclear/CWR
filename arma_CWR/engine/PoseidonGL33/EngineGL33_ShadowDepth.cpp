@@ -318,6 +318,117 @@ bool EnsureAlphaMesh()
     return true;
 }
 
+// POSEIDON_XP_LODBAND (EX2-POP round 3): the casters in the distance band of
+// a level switch go in with both levels, each fragment kept or dropped by a
+// hash of where it is in the world (a 6.25 cm cell), so one level hands over to
+// the other a few texels at a time as the distance changes, instead of whole
+// faces (a coarse forest block's face is tens of metres of shadow). The shadow
+// map's texel grid is anchored to the world (ShadowMath), so a texel samples
+// the same caster point every frame and the pattern holds still in motion.
+GLuint s_dissolveProg = 0;
+GLint s_dissolveLocVP = -1;
+GLint s_dissolveLocTex = -1;
+GLint s_dissolveLocAlpha = -1;
+GLuint s_dissolveVao = 0;
+GLuint s_dissolveVbo = 0;
+
+const char* kDissolveVS = R"(#version 330 core
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec2 uv;
+layout(location = 2) in vec3 hashPos;
+layout(location = 3) in float key;
+uniform mat4 uLightVP;
+out vec2 vUV;
+out vec3 vHash;
+flat out float vKey;
+void main() { vUV = uv; vHash = hashPos; vKey = key; gl_Position = uLightVP * vec4(pos, 1.0); }
+)";
+
+const char* kDissolveFS = R"(#version 330 core
+in vec2 vUV;
+in vec3 vHash;
+flat in float vKey;
+uniform sampler2D uTex;
+uniform int uAlphaTest;
+float CellHash(vec3 p)
+{
+    uvec3 c = uvec3(floor(max(p, vec3(0.0)) * 16.0));
+    uint h = (c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u);
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return float(h & 0xFFFFFFu) * (1.0 / 16777216.0);
+}
+void main()
+{
+    if (uAlphaTest != 0 && texture(uTex, vUV).a < 0.5)
+        discard;
+    float h = CellHash(vHash);
+    bool keep = vKey < 1.5 ? h < vKey : h >= vKey - 2.0;
+    if (!keep)
+        discard;
+}
+)";
+
+bool EnsureDissolveProgram()
+{
+    if (s_dissolveProg)
+        return true;
+    GLuint vs = CompileOne(GL_VERTEX_SHADER, kDissolveVS);
+    GLuint fs = CompileOne(GL_FRAGMENT_SHADER, kDissolveFS);
+    if (!vs || !fs)
+        return false;
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint ok = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok)
+    {
+        glDeleteProgram(prog);
+        return false;
+    }
+    s_dissolveProg = prog;
+    s_dissolveLocVP = glGetUniformLocation(prog, "uLightVP");
+    s_dissolveLocTex = glGetUniformLocation(prog, "uTex");
+    s_dissolveLocAlpha = glGetUniformLocation(prog, "uAlphaTest");
+    return true;
+}
+
+bool EnsureDissolveMesh()
+{
+    if (s_dissolveVao)
+        return true;
+    glGenVertexArrays(1, &s_dissolveVao);
+    glGenBuffers(1, &s_dissolveVbo);
+    GL33Bind::Vao(s_dissolveVao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_dissolveVbo);
+    const GLsizei stride = 9 * sizeof(float);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(5 * sizeof(float)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(8 * sizeof(float)));
+    GL33Bind::Vao(0);
+    return true;
+}
+
+// One dissolve batch resolved for the GL pass: solid (no alpha test, back
+// faces stored like the solid casters) or alpha-tested on `handle`.
+struct ResolvedDissolveBatch
+{
+    GLuint handle;
+    bool solid;
+    int firstVertex;
+    int vertexCount;
+};
+
 bool EnsureAlphaSampler()
 {
     if (s_alphaSampler)
@@ -415,11 +526,14 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
                         const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp,
-                        const CasterCull* cull = nullptr)
+                        const CasterCull* cull = nullptr, const float* dissolveVerts = nullptr,
+                        int dissolveVertCount = 0, const ResolvedDissolveBatch* dissolveBatches = nullptr,
+                        int dissolveBatchCount = 0)
 {
     const bool haveSolid = solidXYZ && solidVertCount >= 3;
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
-    if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha))
+    const bool haveDissolve = dissolveVerts && dissolveVertCount >= 3 && dissolveBatches && dissolveBatchCount > 0;
+    if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha && !haveDissolve))
         return false;
     // Capture the bindings to restore before the Ensure* calls: creating a
     // target or mesh binds (and leaves bound) framebuffer 0 and the new VAO, so
@@ -440,14 +554,15 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         GL33Bind::Vao(static_cast<GLuint>(prevVAO));
     };
     if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh() ||
-        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh() || !EnsureAlphaSampler())))
+        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh() || !EnsureAlphaSampler())) ||
+        (haveDissolve && (!EnsureDissolveProgram() || !EnsureDissolveMesh() || !EnsureAlphaSampler())))
     {
         restore();
         return false;
     }
     // Unit 0's sampler, handed back after the alpha batches.
     GLint prevSampler0 = 0;
-    if (haveAlpha)
+    if (haveAlpha || haveDissolve)
     {
         GL33Bind::ActiveUnit(0);
         glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler0);
@@ -482,12 +597,45 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(alphaVertCount) * 5 * sizeof(float), alphaXYZUV,
                      GL_DYNAMIC_DRAW);
     }
+    if (haveDissolve)
+    {
+        GL33Bind::Vao(s_dissolveVao);
+        glBindBuffer(GL_ARRAY_BUFFER, s_dissolveVbo);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(dissolveVertCount) * 9 * sizeof(float), dissolveVerts,
+                     GL_DYNAMIC_DRAW);
+    }
+    // The band casters, into the current layer (few casters: no per-cascade cull).
+    auto drawDissolve = [&](int layer)
+    {
+        if (!haveDissolve)
+            return;
+        glUseProgram(s_dissolveProg);
+        glUniformMatrix4fv(s_dissolveLocVP, 1, GL_FALSE, lightVPs + layer * 16);
+        glUniform1i(s_dissolveLocTex, 0);
+        GL33Bind::ActiveUnit(0);
+        glBindSampler(0, s_alphaSampler);
+        GL33Bind::Vao(s_dissolveVao);
+        for (int b = 0; b < dissolveBatchCount; b++)
+        {
+            const ResolvedDissolveBatch& db = dissolveBatches[b];
+            if (db.vertexCount < 3)
+                continue;
+            if (db.solid)
+                Poseidon::render::cull::Front();
+            else
+                Poseidon::render::cull::None();
+            glUniform1i(s_dissolveLocAlpha, db.solid ? 0 : 1);
+            GL33Bind::Tex2D(0, db.handle);
+            glDrawArrays(GL_TRIANGLES, db.firstVertex, db.vertexCount);
+        }
+    };
 
     glClearDepth(1.0);
     for (int i = 0; i < numCascades; i++)
     {
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s_arrTex, 0, i);
         Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT);
+        drawDissolve(i);
 
         if (cull)
         {
@@ -572,7 +720,7 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     if (depthClamp)
         Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
     Poseidon::render::pipeline::RestorePolygonOffset(prevOffset);
-    if (haveAlpha)
+    if (haveAlpha || haveDissolve)
         glBindSampler(0, static_cast<GLuint>(prevSampler0));
     glDepthRange(prevDepthRange[0], prevDepthRange[1]);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
@@ -631,12 +779,28 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
         cull.alphaRuns = casters.alphaRuns;
         cull.alphaRunStart = casters.alphaRunStart;
     }
+    // POSEIDON_XP_LODBAND: the band casters' batches (no texture: solid).
+    std::vector<ResolvedDissolveBatch> dissolve;
+    dissolve.reserve(static_cast<size_t>(casters.dissolveBatchCount));
+    for (int b = 0; b < casters.dissolveBatchCount; b++)
+    {
+        const ShadowCasterBatch& src = casters.dissolveBatches[b];
+        TextureGL33* t33 = static_cast<TextureGL33*>(src.texture);
+        if (_textBank && t33)
+            _textBank->UseMipmap(t33, 0, 0);
+        GLuint handle = t33 ? t33->GetHandle() : _fallbackWhiteTex;
+        if (handle == 0)
+            handle = _fallbackWhiteTex;
+        dissolve.push_back({handle, t33 == nullptr, src.firstVertex, src.vertexCount});
+    }
     GpuMark(Poseidon::gpu::Mark::ShadowBegin);
     const bool rendered =
         numCascades >= 1 &&
         RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ, casters.solidVertexCount,
                            casters.alphaXYZUV, casters.alphaVertexCount, resolved.data(),
-                           static_cast<int>(resolved.size()), _lightingActive, useCull ? &cull : nullptr);
+                           static_cast<int>(resolved.size()), _lightingActive, useCull ? &cull : nullptr,
+                           casters.dissolveVerts, casters.dissolveVertexCount, dissolve.data(),
+                           static_cast<int>(dissolve.size()));
     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
     if (numCascades >= 1)
     {

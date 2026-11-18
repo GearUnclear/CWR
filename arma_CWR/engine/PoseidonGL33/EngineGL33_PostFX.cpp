@@ -220,6 +220,7 @@ void EngineGL33::DestroyPostTargets()
     delTex(p.airMeanTex);
     delTex(p.airOutTex);
     p.w = p.h = 0;
+    p.histW = p.histH = 0;
     _taa.history.exists = false; // the TAA history went with its targets
     DestroySsrTargets();
     DestroyFarSlice(); // its put-back target holds the resolved depth
@@ -233,7 +234,7 @@ void EngineGL33::DestroyPostPrograms()
          {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
           &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
           &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum, &p.progMeter,
-          &_farSlice.prog})
+          &p.progTaaUp, &_farSlice.prog})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -251,6 +252,7 @@ void EngineGL33::DestroyPostPrograms()
     p.airUnavailable = false;
     DestroySsrPrograms();
     DestroyXpSunGlare();
+    DestroyXpRain();
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -292,6 +294,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         _farSlice.prog = link(PostShader::FarDepth);
         if (!_farSlice.prog)
             LOG_ERROR(Graphics, "GL33 post: the far slice's depth put-back failed to build; it is off");
+        // EX9-WEAK (Q-4): the upsampling resolve, used while the world draws
+        // below the window (Render Scale under 100%); built always, so the row
+        // can change in a running game. Without it the history stays at the
+        // frame target's size.
+        p.progTaaUp = link(PostShader::TaaUp);
+        if (!p.progTaaUp)
+            LOG_ERROR(Graphics, "GL33 post: the TAA upsample failed to build; the window blit stretches the frame");
         if (vs)
             glDeleteShader(vs);
         // The march and the apply read the rig (LitConstants, binding 3).
@@ -322,7 +331,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     }
     if (p.programsFailed)
         return false;
-    if (p.w == w && p.h == h && p.colorTex)
+    // EX9-WEAK (Q-4): the TAA history at the display's size when the world
+    // draws below it and the upsampling resolve built.
+    const bool up = XpUpscaleActive() && p.progTaaUp;
+    const int histW = up ? _xpDispW : w;
+    const int histH = up ? _xpDispH : h;
+    if (p.w == w && p.h == h && p.histW == histW && p.histH == histH && p.colorTex)
         return true;
     // Targets that came back incomplete are tried again only at another size
     // (a resize, a render scale change) or after a reset, not every frame.
@@ -342,8 +356,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     // TAA: the composite's output and the opaque world copy are read texel by
     // texel; the history is read through bilinear taps (Catmull-Rom).
     p.taaInTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
-    p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
-    p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
+    p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, histW, histH, true);
+    p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, histW, histH, true);
     p.opaqueTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
     // The air pass: the march's two targets and the blur's ping-pong (filtered:
     // the blur and the mean tap between texels, the second target holds the
@@ -447,6 +461,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     p.failedW = p.failedH = 0;
     p.w = w;
     p.h = h;
+    p.histW = histW;
+    p.histH = histH;
     LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts, air and linear depth {}x{}; TAA history half float)", w,
              h, hw, hh);
     return true;
@@ -525,6 +541,9 @@ void EngineGL33::EndWorldScene()
     // own list, by the classic model, combat sources with their classic
     // lights. The composite still scatters this frame's combat lights
     // (combatWasActive).
+    // (POSEIDON_XP_RAIN=world: the drops take the physical lamps and low beams
+    // that lit this world pass.)
+    const bool rainNightLights = _nightLightsActive && _lightTiles.frame == GetFrameCounter();
     _lightTilesActive = false;
     _nightLightsActive = false;
     const bool combatWasActive = _combat.active;
@@ -653,6 +672,9 @@ void EngineGL33::EndWorldScene()
         if (stage == rm::PostStage::Resolve)
             BeginPostFullscreen();
     }
+    // POSEIDON_XP_RAIN=world: the rain's streaks over the finished frame.
+    if (_xpRain.scene.frame == GetFrameCounter())
+        PostXpRain(f, rainNightLights);
     GpuMark(Poseidon::gpu::Mark::PostEnd);
     EndPostFullscreen();
     // The linear depth the next frame's combat shadow mask traces through,

@@ -809,6 +809,7 @@ void Scene::BeginObjects()
     {
         Fail("No camera.");
     }
+    UpdateShadowKeep(); // POSEIDON_XP_SHADOWKEEP (LodPop.hpp)
 
     // precalculate shadow properties - constant precalculation
     float addLightsFactor = GScene->MainLight()->NightEffect();
@@ -852,31 +853,43 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
                 return;
             }
             // some invisible objects have visible shadows
-            // simple test - shadow possible
-            if (_camera->IsClipped(pos, radius + 50, 1))
+            if (_shadowKeep.on)
             {
-                return;
-            }
-
-            Vector3 objTop = obj->Position() + Vector3(0, radius, 0);
-            Vector3 shadowPos = objTop;
-
-            // estimate shadow position
-            if (!ShadowPos(objTop, shadowPos, _mainLight))
-            {
-                return;
-            }
-            if (_camera->IsClipped(shadowPos, 0.5f, 1))
-            {
-                // shadow of object top is clipped
-                // check whole shadow shape
-                // estimate shadow radius and shadow center
-                float distTopBot = shadowPos.Distance(pos) * 0.5f;
-                Vector3 shadowCenter = (shadowPos + pos) * 0.5f;
-                float shadowRadius = floatMax(distTopBot, radius);
-                if (_camera->IsClipped(shadowCenter, shadowRadius, 1))
+                // POSEIDON_XP_SHADOWKEEP: follow the shadow along the sun ray
+                // the shadow maps use, as far as it can go
+                if (!ShadowKeepObject(pos, radius))
                 {
                     return;
+                }
+            }
+            else
+            {
+                // simple test - shadow possible
+                if (_camera->IsClipped(pos, radius + 50, 1))
+                {
+                    return;
+                }
+
+                Vector3 objTop = obj->Position() + Vector3(0, radius, 0);
+                Vector3 shadowPos = objTop;
+
+                // estimate shadow position
+                if (!ShadowPos(objTop, shadowPos, _mainLight))
+                {
+                    return;
+                }
+                if (_camera->IsClipped(shadowPos, 0.5f, 1))
+                {
+                    // shadow of object top is clipped
+                    // check whole shadow shape
+                    // estimate shadow radius and shadow center
+                    float distTopBot = shadowPos.Distance(pos) * 0.5f;
+                    Vector3 shadowCenter = (shadowPos + pos) * 0.5f;
+                    float shadowRadius = floatMax(distTopBot, radius);
+                    if (_camera->IsClipped(shadowCenter, shadowRadius, 1))
+                    {
+                        return;
+                    }
                 }
             }
             invisible = true;

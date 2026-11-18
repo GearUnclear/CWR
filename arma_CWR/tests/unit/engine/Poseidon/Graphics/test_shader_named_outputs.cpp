@@ -247,3 +247,33 @@ TEST_CASE("I-28 (Option E): every named intermediate is declared AND used in the
         REQUIRE(occurrences >= r.minOccurrences);
     }
 }
+
+TEST_CASE("EX2-POP: the shadow depth pass's band dissolve shaders compile under glslang", "[Graphics][Shaders][lodpop]")
+{
+    GlslangInit init;
+    const std::filesystem::path src =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33" / "EngineGL33_ShadowDepth.cpp";
+    const std::string body = ReadTextFile(src);
+    REQUIRE_FALSE(body.empty());
+    for (const char* name : {"kDissolveVS", "kDissolveFS"})
+    {
+        CAPTURE(name);
+        const std::string head = std::string("const char* ") + name + " = R\"(";
+        const size_t at = body.find(head);
+        REQUIRE(at != std::string::npos);
+        const size_t start = at + head.size();
+        const size_t close = body.find(")\"", start);
+        REQUIRE(close != std::string::npos);
+        // Plain GL 3.30 rules (these programs use loose uniforms, which the
+        // SPIR-V target of CompileGLSL refuses).
+        const EShLanguage stage = name[9] == 'V' ? EShLangVertex : EShLangFragment;
+        const std::string text = body.substr(start, close - start);
+        glslang::TShader shader(stage);
+        const char* strings[1] = {text.c_str()};
+        shader.setStrings(strings, 1);
+        const bool ok = shader.parse(GetDefaultResources(), 330, /*forwardCompatible*/ false, EShMsgDefault);
+        const CompileOutcome outcome{ok, shader.getInfoLog()};
+        CAPTURE(outcome.info);
+        REQUIRE(outcome.success);
+    }
+}

@@ -119,6 +119,111 @@ float puddleNoise(vec2 p) {
     return mix(mix(puddleHash(i), puddleHash(i + vec2(1, 0)), u.x),
                mix(puddleHash(i + vec2(0, 1)), puddleHash(i + vec2(1, 1)), u.x), u.y);
 }
+// Shore water's surf (litWater2, EngineGL33_Sea.cpp; the sea program draws
+// the waves coming in, the land program their run-up). Waves come about every
+// kSurfPeriod seconds (6 to 12 s), and the cycle's offset wanders along the shore (a
+// low-frequency noise, so neighbouring stretches of beach take their wave at
+// different times) and each wave's reach is drawn from a noise sampled per
+// wave: a bigger wave breaks further out, so it also arrives later and runs up
+// further, and no two waves at a spot are alike. Distances are horizontal
+// metres from the waterline (the sea's drawn level), so the waves move at the
+// same speed on steep and gentle beaches. A wave breaks kSurfZone x reach out,
+// its foam line rolls in at kSurfSpeed, runs up the sand and slides back
+// (ballistic), and the sand it wetted dries behind it.
+const float kSurfPeriod = 8.0;     // s: the clock wraps at 4096 s, 512 waves
+const float kSurfZone = 14.0;      // m: where a wave of reach 1 breaks
+const float kSurfSpeed = 5.0;      // m/s: its foam line's speed toward the beach
+const float kSwashTime = 2.6;      // s: a run-up's duration, plus 1 s per reach
+const float kSwashRunup = 0.32;    // m above the sea a wave of reach 1 runs up ...
+const float kSwashMin = 2.0;       // m: ... but at least this far up the sand per reach ...
+const float kSwashMax = 8.0;       // m: ... and at most this far
+const float kSurfFoamAlbedo = 0.8; // the lace on the sand
+
+// The time (s) in its wave's cycle at clock t of the shore at waterline point
+// xz (every spot takes its waterline point's wave, so a wave's line stays
+// whole across the surf and only differs along the shore); reach this wave's
+// reach (0.55..1.45), prevReach the wave before it.
+float surfTime(vec2 xz, float t, out float reach, out float prevReach) {
+    // The clock itself wanders (up to 0.045 cycles per second either way), so
+    // a spot's waves come 6 to 12 s apart instead of on a beat; along the shore
+    // the offset changes over about 10, 40 and 120 m.
+    float c = t / kSurfPeriod + 0.6 * puddleNoise(vec2(t * 0.05, 0.0) + xz * 0.004) +
+              1.5 * puddleNoise(xz * 0.008 + vec2(3.1, 7.7)) + 0.8 * puddleNoise(xz * 0.025) +
+              0.3 * puddleNoise(xz * 0.07 + vec2(11.0, 5.0));
+    float k = floor(c);
+    reach = 0.55 + 0.9 * puddleNoise(xz * 0.015 + vec2(k * 0.71, k * 0.37));
+    prevReach = 0.55 + 0.9 * puddleNoise(xz * 0.015 + vec2((k - 1.0) * 0.71, (k - 1.0) * 0.37));
+    return (c - k) * kSurfPeriod;
+}
+// When a wave of this reach reaches the waterline (s into its cycle), and how
+// long its run-up lasts (over before the next wave's cycle starts).
+float surfArrive(float reach) {
+    return kSurfZone * reach / kSurfSpeed;
+}
+float surfSwashTime(float reach) {
+    return min(kSwashTime + reach, kSurfPeriod - surfArrive(reach) - 0.1);
+}
+// How far up a slope s (m per m) a wave of this reach runs (m).
+float surfRunup(float reach, float s) {
+    return clamp(kSwashRunup * reach / max(s, 1e-3), kSwashMin * reach, kSwashMax * reach);
+}
+// The ground's gradient (m per m, uphill) under world xz, smooth across the
+// terrain's triangles: the central differences at the cell's four corners,
+// mixed bilinearly (a surf measured by the triangles' own slopes would step at
+// their edges).
+vec2 surfFloorGrad(vec2 xz) {
+    vec2 g = xz * litTerrain.y;
+    int last = int(1.0 / litTerrain.z + 0.5) - 1;
+    vec2 i = floor(g);
+    vec2 f = g - i;
+    ivec2 p = ivec2(i);
+    vec2 s[4];
+    for (int k = 0; k < 4; ++k) {
+        ivec2 c = p + ivec2(k & 1, k >> 1);
+        ivec2 xm = clamp(c - ivec2(1, 0), ivec2(0), ivec2(last));
+        ivec2 xp = clamp(c + ivec2(1, 0), ivec2(0), ivec2(last));
+        ivec2 zm = clamp(c - ivec2(0, 1), ivec2(0), ivec2(last));
+        ivec2 zp = clamp(c + ivec2(0, 1), ivec2(0), ivec2(last));
+        vec2 d = vec2(texelFetch(terrainHeight, xp, 0).r - texelFetch(terrainHeight, xm, 0).r,
+                      texelFetch(terrainHeight, zp, 0).r - texelFetch(terrainHeight, zm, 0).r);
+        s[k] = d * (0.5 * litTerrain.y);
+    }
+    return mix(mix(s[0], s[1], f.x), mix(s[2], s[3], f.x), f.y);
+}
+// The swash x m up the sand from the waterline (slope s) at cycle time tau: x
+// the water's sheet (1 under it), y its foam (the uprush's foaming edge, foam
+// over the sheet, and the lace it leaves as it slides back), z the sand's
+// wetness since the water left it (1 just left, drying over a few seconds).
+// lace is a breakup noise (0..1).
+vec3 surfSwash(float x, float tau, float reach, float prevReach, float s, float lace) {
+    float ta = surfArrive(reach);
+    float ts = surfSwashTime(reach);
+    float v = (tau - ta) / ts;
+    float runup = surfRunup(reach, s);
+    bool on = v > 0.0 && v < 1.0;
+    float front = on ? runup * 4.0 * v * (1.0 - v) : 0.0;
+    float sheet = on ? 1.0 - smoothstep(front - 0.5, front + 0.1, x) : 0.0;
+    // The time since the water last left x: this wave's backwash (past its
+    // top it leaves x at v = 0.5 + 0.5 sqrt(1 - x / runup)), else the wave
+    // before it.
+    float since = 1.0e3;
+    if (x < runup && v > 0.5) {
+        float vd = 0.5 + 0.5 * sqrt(max(1.0 - x / runup, 0.0));
+        if (v > vd) since = (v - vd) * ts;
+    }
+    float runupP = surfRunup(prevReach, s);
+    if (since > 999.0 && x < runupP) {
+        float vd = 0.5 + 0.5 * sqrt(max(1.0 - x / runupP, 0.0));
+        since = kSurfPeriod - (surfArrive(prevReach) + vd * surfSwashTime(prevReach)) + tau;
+    }
+    float up = on ? 1.0 - smoothstep(0.35, 0.6, v) : 0.0; // the uprush foams, the backwash less
+    float edge = on ? exp(-abs(x - front) / 0.5) * mix(0.45, 1.0, up) * smoothstep(0.0, 0.08, v) *
+                          (1.0 - smoothstep(0.85, 1.0, v)) : 0.0;
+    float over = sheet * smoothstep(0.45, 0.7, lace) * mix(0.25, 0.6, up);
+    float left = exp(-since / 1.8) * smoothstep(0.4, 0.7, lace);
+    return vec3(sheet, clamp(max(max(edge * smoothstep(0.15, 0.45, lace), over), left), 0.0, 1.0), exp(-since / 4.0));
+}
+
 // The terrain's height at world xz, smoothly interpolated between the map's
 // texels (a smoothstep on the bilinear weights: no crease at the cell edges).
 float puddleHeight(vec2 xz) {

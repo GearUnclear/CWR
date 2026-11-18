@@ -14,8 +14,8 @@
 // Touching any tier row re-derives the preset to "Custom" without
 // snapping back.  Per-user knobs (Anti-aliasing / Supersampling /
 // Multitexturing / VSync / FPS Cap / Brightness / Gamma, and the
-// Remastered lighting's Shadow Detail / Shore Water / Lamp Shadows / Sun
-// Glare) are NOT
+// Remastered lighting's Shadow Detail / Shore Water / Surf / Lamp Shadows /
+// Sun Glare / Ground Cover) are NOT
 // preset-driven; they keep their value across preset changes.
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
@@ -58,38 +58,41 @@ private:
 	class GraphicsProvider : public OptionsScrollList::Provider
 	{
 	public:
-		enum : int {
-			kRowPreset         = 0,
-			kRowTerrain        = 1,
-			kRowObjectLod      = 2,
-			kRowShadow         = 3,
-			kRowParticles      = 4,
-			kRowVsync          = 5,
-			kRowFpsCap         = 6,
-			kRowBrightness     = 7,
-			kRowGamma          = 8,
-			kRowAdvanced       = 9,
-			kRowAntiAliasing   = 10,
-			kRowSupersampling  = 11,
-			kRowMultitexturing = 12,
-			kRowLighting       = 13,
-			kRowShadowDetail   = 14,
-			kRowShoreWater     = 15,
-			kRowLampShadows    = 16,
-			kRowSunGlare       = 17,
-			kRowCount          = 18,
-		};
+      enum : int
+      {
+          kRowPreset = 0,
+          kRowTerrain = 1,
+          kRowObjectLod = 2,
+          kRowShadow = 3,
+          kRowParticles = 4,
+          kRowVsync = 5,
+          kRowFpsCap = 6,
+          kRowBrightness = 7,
+          kRowGamma = 8,
+          kRowAdvanced = 9,
+          kRowAntiAliasing = 10,
+          kRowSupersampling = 11,
+          kRowMultitexturing = 12,
+          kRowLighting = 13,
+          kRowShadowDetail = 14,
+          kRowShoreWater = 15,
+          kRowSurfStyle = 16,
+          kRowLampShadows = 17,
+          kRowSunGlare = 18,
+          kRowGroundCover = 19,
+          kRowCount = 20,
+      };
 
-		void SetPage(class GraphicsPage* page) { m_page = page; }
+      void SetPage(class GraphicsPage* page) { m_page = page; }
 
-		int  RowCount() const override         { return kRowCount; }
-		const char* RowLabel(int row) const override;
-		const char* RowDescription(int row) const override;
-		OptionsScrollList::RowDef RowFor(int row) const override;
-		int  RowValue(int row) const override;
-		void SetRowValue(int row, int v) override;
-		const char* SliderValueText(int row) const override;
-		OptionsScrollList::Kind RowKind(int row) const override;
+      int RowCount() const override { return kRowCount; }
+      const char* RowLabel(int row) const override;
+      const char* RowDescription(int row) const override;
+      OptionsScrollList::RowDef RowFor(int row) const override;
+      int RowValue(int row) const override;
+      void SetRowValue(int row, int v) override;
+      const char* SliderValueText(int row) const override;
+      OptionsScrollList::Kind RowKind(int row) const override;
 
 	private:
 		GraphicsPage* m_page = nullptr;
@@ -112,9 +115,9 @@ private:
 	std::array<const char*, 3>      m_particlesCStrs{};
 	std::array<std::string, 4>      m_msaaLabels;
 	std::array<const char*, 4>      m_msaaCStrs{};
-	std::array<std::string, 5>      m_renderScaleLabels;
-	std::array<const char*, 5>      m_renderScaleCStrs{};
-	std::array<std::string, 2>      m_offOnLabels;
+    std::array<std::string, 6> m_renderScaleLabels;
+    std::array<const char*, 6> m_renderScaleCStrs{};
+    std::array<std::string, 2>      m_offOnLabels;
 	std::array<const char*, 2>      m_offOnCStrs{};
 	std::array<std::string, 3>      m_vsyncLabels;
 	std::array<const char*, 3>      m_vsyncCStrs{};
@@ -124,10 +127,12 @@ private:
     std::array<const char*, 2> m_lightingCStrs{};
     std::array<std::string, 2> m_shadowDetailLabels;
     std::array<const char*, 2> m_shadowDetailCStrs{};
+    std::array<std::string, 2> m_surfStyleLabels;
+    std::array<const char*, 2> m_surfStyleCStrs{};
 
-	void RefreshLocalizedChoices();
+    void RefreshLocalizedChoices();
 
-	friend class GraphicsProvider;
+    friend class GraphicsProvider;
 };
 
 } // namespace Poseidon

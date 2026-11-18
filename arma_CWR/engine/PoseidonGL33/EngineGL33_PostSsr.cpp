@@ -30,6 +30,7 @@
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/SeaMirror.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -69,9 +70,10 @@ GLuint CompileSsrShader(GLenum type, const char* src, const char* name)
     return s;
 }
 
-GLuint LinkSsrProgram(GLuint vs, PostShader shader)
+GLuint LinkSsrProgram(GLuint vs, PostShader shader, const char* source = nullptr)
 {
-    GLuint fs = CompileSsrShader(GL_FRAGMENT_SHADER, PostShaderSource(shader), PostShaderName(shader));
+    GLuint fs =
+        CompileSsrShader(GL_FRAGMENT_SHADER, source ? source : PostShaderSource(shader), PostShaderName(shader));
     if (!vs || !fs)
     {
         if (fs)
@@ -203,7 +205,9 @@ bool EngineGL33::EnsureSsrResources(int w, int h)
                                      PostShaderName(PostShader::Vertex));
         s.progTag = LinkSsrProgram(vs, PostShader::SsrTag);
         s.progShare = LinkSsrProgram(vs, PostShader::SsrShare);
-        s.progTrace = LinkSsrProgram(vs, PostShader::SsrTrace);
+        // XP sea mirror: the trace that reads the sea's own wave slope.
+        s.progTrace = LinkSsrProgram(vs, PostShader::SsrTrace,
+                                     rm::SeaMirrorXpOn() ? Poseidon::gl33lighting::SeaMirrorTraceSourceXp() : nullptr);
         s.progBlur = LinkSsrProgram(vs, PostShader::SsrBlur);
         s.progComposite = LinkSsrProgram(vs, PostShader::SsrComposite);
         if (vs)
@@ -464,6 +468,15 @@ void EngineGL33::PostSsr(PostFrame& f)
     // The ground field, the land's classes the forward pass used (the world's
     // own binding of that unit, so it stays bound after the stage).
     BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());
+    // XP sea mirror: the sea's wave slope (the stock trace has neither uniform).
+    const bool seaWave = seaProgram && rm::SeaMirrorXpOn() && SeaWaveThisFrame();
+    if (seaWave)
+    {
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kSeaMirrorWaveUnit);
+        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, _seaWaveTex);
+    }
+    SetInt(tr, "seaWave", Poseidon::gl33lighting::kSeaMirrorWaveUnit);
+    Set4(tr, "ssrSea", seaWave ? 1.0f : 0.0f, rm::SeaMirrorXpScale(), rm::SeaMirrorXpWeight(), 0.0f);
     // (The raw binds above left the bind cache's active unit stale: without
     // this the sky table could land on unit 5, the depth's.)
     GL33Bind::Invalidate();
@@ -479,7 +492,7 @@ void EngineGL33::PostSsr(PostFrame& f)
     const GLint v2wLoc = glGetUniformLocation(tr, "v2w");
     if (v2wLoc >= 0)
         glUniformMatrix3fv(v2wLoc, 1, GL_FALSE, v2w);
-    Set4(tr, "camWorld", cp.X(), cp.Y(), cp.Z(), land ? land->GetSeaLevel() : 0.0f);
+    Set4(tr, "camWorld", cp.X(), cp.Y(), cp.Z(), land ? land->GetSeaLevelDrawn() : 0.0f);
     // The world's fog as BeginPass copied it (the surfaces the trace changes
     // draw with it), not the frame state's fog flag, which is the last draw's.
     Set4(tr, "fogParam", _ssrWorldFog[0], _ssrWorldFog[1], 0.0f, 0.0f);
@@ -489,6 +502,12 @@ void EngineGL33::PostSsr(PostFrame& f)
          seaProgram ? 1.0f : 0.0f);
     Set4(tr, "ssrWetMode", wetWeather ? 1.0f : 0.0f, wetWeather ? _wetFrame.puddles : 0.0f, 0.0f, 0.0f);
     DrawTo(s.traceFbo, f.hw, f.hh);
+    if (seaWave)
+    {
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kSeaMirrorWaveUnit);
+        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+        GL33Bind::Invalidate();
+    }
 
     // 3. The rough blur: the trace gathered sideways over each texel's spread.
     const GLuint bl = s.progBlur;

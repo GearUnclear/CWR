@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/SeaFlow.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -771,6 +772,22 @@ void Landscape::SetSkyTexture(Texture* texture)
 Texture* Landscape::SkyTexture()
 {
     return _weather.SkyTexture();
+}
+
+// XP sea flow (POSEIDON_XP_SEAFLOW_HEAVE, Graphics/Remaster/SeaFlow.hpp): the
+// level the sea is DRAWN at. The simulated level (GetSeaLevel: boats, wading,
+// collisions, the network) is never touched; only the picture keeps a share
+// of the sea level's rise and fall, so the wave pattern is not slid toward
+// the viewer and back every period. At share 1 (the switches unset) it is
+// the simulated level itself, bit for bit.
+float Landscape::GetSeaLevelDrawn() const
+{
+    const float share = remaster::SeaFlowXpHeave();
+    if (share >= 1.0f)
+    {
+        return _seaLevelWave;
+    }
+    return _seaLevel + (_seaLevelWave - _seaLevel) * share;
 }
 
 void Landscape::Simulate(float deltaT)

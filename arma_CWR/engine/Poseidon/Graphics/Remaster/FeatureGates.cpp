@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 
+#include <Poseidon/Graphics/Remaster/Canopy.hpp>
+
 #include <cstdio>
 
 namespace Poseidon::remaster
@@ -232,7 +234,14 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return Off("not morning, no fog", scale);
 
         case Feature::CanopyShadows:
-            if (in.sunElevationDeg <= kGateCanopyMinSunDeg || in.sunElevationDeg >= kGateCanopyMaxSunDeg)
+            if (in.canopyAllSun)
+            {
+                if (in.sunElevationDeg <= kGateCanopyMinSunDeg)
+                    return Off("sun below 2 deg", scale);
+                if (!(CanopyLengthFade(in.sunElevationDeg, kCanopyTargetTexel) > 0.0f))
+                    return Off("sun too high for a shadow beside a crown", scale);
+            }
+            else if (in.sunElevationDeg <= kGateCanopyMinSunDeg || in.sunElevationDeg >= kGateCanopyMaxSunDeg)
                 return Off("sun outside 2 to 25 deg", scale);
             if (in.skyThrough <= kGateCanopyMinSkyThrough)
                 return Off("overcast (sky-through 0.5 or less)", scale);

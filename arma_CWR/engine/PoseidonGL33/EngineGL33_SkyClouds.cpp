@@ -355,7 +355,8 @@ void EngineGL33::UploadLitClouds(float skyThrough, bool cloudField)
     const bool shadows = _featureGates[rm::Feature::SkyCloudShadows].on && cloudField;
     // The dome turns with the sky clouds' drift whenever a clouds switch is on
     // (not only when gated on: the dome would jump when a gate opened).
-    const float turn = rm::SkyDomeTurnU(land->CloudsPosition());
+    // (POSEIDON_XP_CLOUDS_TIMELAPSE adds its drift; 0 when unset.)
+    const float turn = rm::SkyDomeTurnU(land->CloudsPosition() + XpCloudsTimelapse());
     SetLitSlot(LC::Sky, lit, shadows ? 1.0f : 0.0f, turn, skyThrough);
 
     // The shadow anchor, once per frame (the sky pass and the world pass both

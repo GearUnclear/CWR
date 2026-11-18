@@ -18,6 +18,7 @@
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
+#include <Poseidon/Graphics/Remaster/Canopy.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
@@ -492,6 +493,7 @@ void EngineGL33::DeinitLightingResources()
     DeinitLightTiles();
     DeinitSkyClouds();
     DeinitCanopy();
+    DeinitShoreRibbons();
     DeinitCombatResources();
     DestroyFogResources();
     _post.unavailable = false;
@@ -621,17 +623,21 @@ void EngineGL33::UploadTerrainHorizonMap()
     glBindTexture(GL_TEXTURE_2D, 0);
 
     // The ground field (the wet weather's land classes): the land's own colour
-    // per vertex, a = 1; 16 bits a channel, as the wet classes are steep in
-    // the colour. None without ground colours (the stand-in's a = 0).
+    // per vertex, 16 bits a channel, as the wet classes are steep in the
+    // colour. a = 1 on open land down to 0.75 among buildings (groundBuilt;
+    // only the ground cover's blades read the share, everything else tests
+    // a > 0.5: built). None without ground colours (the stand-in's a = 0).
     if (m.groundColor.size() == static_cast<size_t>(n) * n * 3)
     {
         std::vector<unsigned short> gc(static_cast<size_t>(n) * n * 4);
+        const bool built = m.groundBuilt.size() == static_cast<size_t>(n) * n;
         for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
         {
             for (int c = 0; c < 3; ++c)
                 gc[i * 4 + c] = static_cast<unsigned short>(
                     std::lround(std::clamp(m.groundColor[i * 3 + c], 0.0f, 1.0f) * 65535.0f));
-            gc[i * 4 + 3] = 65535;
+            const float share = built ? std::clamp(m.groundBuilt[i], 0.0f, 1.0f) : 0.0f;
+            gc[i * 4 + 3] = static_cast<unsigned short>(std::lround((1.0f - 0.25f * share) * 65535.0f));
         }
         glGenTextures(1, &_groundFieldTex);
         glBindTexture(GL_TEXTURE_2D, _groundFieldTex);
@@ -747,6 +753,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.nightVision = _nightVision;
     in.skyTablesReady = SkyTablesReady();
     in.skyDensityReady = SkyDensityReady();
+    in.canopyAllSun = rm::CanopyAllSunHeights(); // experiment EX6-CANOPY
     // The reflections' screen shares, read back from a recent frame's tags
     // (EngineGL33_PostSsr.cpp); older than a few frames they count as not
     // measured.
@@ -982,6 +989,27 @@ void EngineGL33::UploadLitFrameConstants()
         _particleRigLight[1] = irr.g * k;
         _particleRigLight[2] = irr.b * k;
         _particleRigFrame = GetFrameCounter();
+        // POSEIDON_XP_RAIN=world (EngineGL33_XpRain.cpp): the same rig split
+        // into the sky (all round a drop) and the key (scattered forward).
+        if (rm::RainXpModeFromEnv() == rm::RainXpMode::World)
+        {
+            const float field = 1.0f - std::min(std::max(rig.cloudCover, 0.0f), 1.0f) *
+                                           (1.0f - std::min(std::max(rig.cloudTransmit, 0.0f), 1.0f));
+            const rm::Rgb sky =
+                (rig.skyZenith + rig.skyHorizon + rig.skyHorizonSun + rig.skyGround) * (0.25f * std::max(shade, 0.0f));
+            const rm::Rgb direct = key.radiance * (key.IsMoon() ? 1.0f : field) + rig.moon;
+            _xpRain.sky[0] = sky.r;
+            _xpRain.sky[1] = sky.g;
+            _xpRain.sky[2] = sky.b;
+            _xpRain.key[0] = direct.r;
+            _xpRain.key[1] = direct.g;
+            _xpRain.key[2] = direct.b;
+            for (int i = 0; i < 3; ++i)
+                _xpRain.toward[i] = key.toward[i];
+            _xpRain.rigExposure = _combat.exposure;
+            _xpRain.localScale = _lighting.localLights * localGain;
+            _xpRain.lightFrame = GetFrameCounter();
+        }
     }
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);

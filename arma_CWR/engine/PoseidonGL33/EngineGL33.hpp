@@ -44,6 +44,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/RainXp.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
@@ -481,6 +482,35 @@ class EngineGL33 : public Engine
     int _ssaaH = 0;
 
     bool SSAAActive() const { return _ssaaFbo != 0; }
+
+    // EX9-WEAK, plan item Q-4 (a Render Scale below 100%, or the test override
+    // POSEIDON_XP_RENDERSCALE=<0.5..0.99>): the world and its post stages draw
+    // at that share of the window; the TAA resolve reconstructs at the window's size into
+    // the history, and the sharpen writes a second, window-sized multisampled
+    // target (the display set below) where the HUD then draws as it does
+    // today. The display set takes the frame target's names for the rest of
+    // the frame (XpSwapFrameTargets), so the HUD, the resolve to the window
+    // and the screenshot all see a window-sized frame target; BackToFront
+    // hands the names back. Targets are made only when the window size or a
+    // knob changes, never per frame.
+    float _xpUpScale = 1.0f; // < 1: the world's share of the window (from the env, at target creation)
+    unsigned int _xpDispFbo = 0;
+    unsigned int _xpDispColorRb = 0;
+    unsigned int _xpDispDepthRb = 0;
+    unsigned int _xpDispResolveFbo = 0;
+    unsigned int _xpDispResolveRb = 0;
+    int _xpDispW = 0;
+    int _xpDispH = 0;
+    bool _xpOnDisplay = false; // the names are swapped: the frame target is the display set
+    int _xpDispFailW = 0;      // a display size whose target came back incomplete: not retried
+    int _xpDispFailH = 0;
+    // The world draws below the window and the TAA resolve upsamples (the
+    // display set exists; swapped or not, one of the two sets is in these
+    // names). _xpDispW/_xpDispH are the display's size only while not swapped
+    // (the world's passes and the post stages up to the sharpen).
+    bool XpUpscaleActive() const { return _xpDispFbo != 0; }
+    void XpSwapFrameTargets();
+    void XpDestroyDisplayTarget();
     // Pixel size of the current render target: the scaled offscreen target
     // when SSAA is active, else the window.  Every glViewport/glScissor that
     // addresses the frame target derives from this.
@@ -763,6 +793,8 @@ class EngineGL33 : public Engine
     bool RemasterMoonKey() const override;
     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
     bool ParticleRigLight(float linear[3]) const override;
+    bool RainXpWorldReady() const override;
+    void SetRainXpFrame(const Poseidon::remaster::RainXpFrame& rain) override;
     bool CombatLightsActive() const override { return _combat.active; }
     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
@@ -791,14 +823,36 @@ class EngineGL33 : public Engine
     void BeginRemasterSky(Poseidon::RemasterSky mode) override;
     void EndRemasterSky() override;
     bool RemasterSkyPending() const override;
+    bool VolumetricCloudsDrawn() const override;
     std::string RemasterSkyCheck(int texels) override;
     // --- The remastered sea (EngineGL33_Sea.cpp) ---
     void BeginSea(Texture* otherFrame, float otherWeight) override;
     void EndSea() override;
     // Between BeginSea and EndSea with the feature on: the landscape's sea
     // faces route to the water program (BuildContext::remasteredSea).
-    bool SeaRouted() const { return _seaOpen; }
+    bool SeaRouted() const override { return _seaOpen; }
     bool _seaOpen = false;
+    // XP sea mirror (EngineGL33_XpSeaMirror.cpp, POSEIDON_XP_SEAMIRROR): the
+    // sea's wave slope, a multisampled RG16F texture on attachment 2 of the
+    // frame target, in the draw buffers only between BeginSea and EndSea.
+    void SeaWaveBegin();
+    void SeaWaveEnd();
+    void DestroySeaWaveTarget();
+    bool SeaWaveThisFrame() const; // the sea wrote the slope this frame
+    unsigned int _seaWaveTex = 0;
+    int _seaWaveW = 0, _seaWaveH = 0, _seaWaveSamples = 0;
+    uint32_t _seaWaveFrame = 0;
+    bool _seaWaveFrameValid = false;
+    bool _seaWaveOpen = false;
+    bool _seaWaveFailed = false;
+    // Shore ribbons (EngineGL33_ShoreRibbons.cpp, under Shore Water's surf):
+    // breaking-wave ribbons along the coastline, drawn by EndSea after the
+    // sea's own draws. Active: the surf runs and the Surf option (or
+    // POSEIDON_XP_SURF) picks Ribbons (UploadLitSeaShore then flags litWater2.x
+    // with 16).
+    void DrawShoreRibbons();
+    bool ShoreRibbonsActive();
+    void DeinitShoreRibbons();
     // --- Long tree shadows: the canopy and its sun-visibility map (EngineGL33_Canopy.cpp) ---
     void SetTerrainCanopy(std::shared_ptr<const Poseidon::remaster::CanopyField> canopy) override;
     void TerrainCanopyChanged(const Poseidon::remaster::CanopyRect* rects, int count) override;
@@ -971,6 +1025,11 @@ class EngineGL33 : public Engine
     // by SetLookOptions.
     void UploadLitSeaShore();
     int _shoreWaterParts = 0;
+    // The surf's style (the Surf option, LookOptions::surfStyle; set by
+    // SetLookOptions): true draws the shore ribbons, false (Painted, the
+    // default) the sea and land programs' painted surf. Read only while the
+    // shore's surf part runs.
+    bool _surfRibbons = false;
     // The surface class of the draw ApplyPassState prepares (its texture and
     // object kind) into LitConst::MatClass xy, uploaded only when it changes.
     void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
@@ -1098,6 +1157,19 @@ class EngineGL33 : public Engine
     void PinSkyShadowAnchor(bool pinned);
     // The Sky and SkyShadow slots; `cloudField` = the rig casts cloud shadows.
     void UploadLitClouds(float skyThrough, bool cloudField);
+    // The experiment POSEIDON_XP_CLOUDS (EngineGL33_XpClouds.cpp): volumetric
+    // clouds from the weather sky's density map, marched at half the 3D
+    // viewport's width and height before the dome draws, blended with the last
+    // frame's reprojected result; the dome and the sun disk read them on unit
+    // 11 (litXpClouds). RunXpClouds runs the march when the sky pass opens the
+    // dome with the sky table on by day (`domeTable`); BindXpClouds binds the
+    // result (or the white stand-in) and sets the slot for the sky pass's mode.
+    void RunXpClouds(bool domeTable);
+    void BindXpClouds(bool on);
+    void DeinitXpClouds();
+    // The extra clouds position the time-lapse adds (POSEIDON_XP_CLOUDS_TIMELAPSE:
+    // that many units per second of simulation time; 0 when unset).
+    float XpCloudsTimelapse() const;
     // The canopy (EngineGL33_Canopy.cpp): the stand-ins on units 10 and 15, the
     // canopy texture (uploaded whole, or the rectangles that changed), the GPU
     // build of the sun-visibility map when the sun or the camera moved, the
@@ -1189,6 +1261,11 @@ class EngineGL33 : public Engine
         unsigned int opaqueTex = 0, opaqueFbo = 0;
         unsigned int progTaa = 0, progTaaSharpen = 0;
         unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off
+        // EX9-WEAK (POSEIDON_XP_RENDERSCALE): the history's size (the display's
+        // when the world draws below it, else the frame target's) and the
+        // upsampling resolve.
+        int histW = 0, histH = 0;
+        unsigned int progTaaUp = 0;
         // The air pass (EngineGL33_PostAir.cpp), half resolution: the
         // march's two targets (RGBA16F: beams, headlights, haze sun
         // visibility, view depth; RG16F: valley mist top and density), the
@@ -1444,8 +1521,45 @@ class EngineGL33 : public Engine
         float r = 1.0f, g = 1.0f, b = 1.0f; // the sun's colour by its peak
     };
     float _sunGlareGain = 0.0f;
+    // Ground cover (the Graphics page's Ground Cover option, first the
+    // experiment POSEIDON_XP_GRASS; CanGrass, Landscape::DrawRect): set by
+    // SetLookOptions, read by the draw only.
+    bool _groundCover = false;
     XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
     void DestroyXpSunGlare();
+    // Rain you can see (POSEIDON_XP_RAIN=world, perf-squad lane EX4-RAIN;
+    // EngineGL33_XpRain.cpp, Graphics/Remaster/RainXp.hpp): camera-anchored
+    // world-space streaks drawn over the finished frame after the TAA resolve,
+    // in the scene's rain (SetRainXpFrame), lit by the frame's rig (captured
+    // with it in UploadLitFrameConstants) and its lamps and headlights.
+    struct XpRainState
+    {
+        Poseidon::remaster::RainXpFrame scene; // the scene's rain this frame
+        // The rig's light on a drop (linear, before any exposure): the sky's
+        // mean radiance (times the shade) and the key's radiance (the sun's
+        // through the cloud field, or the moon's), toward the key, and the
+        // rig's exposure; for frame lightFrame.
+        float sky[3] = {0.0f, 0.0f, 0.0f};
+        float key[3] = {0.0f, 0.0f, 0.0f};
+        float toward[3] = {0.0f, 1.0f, 0.0f};
+        float rigExposure = 1.0f;
+        float localScale = 1.0f; // the local lights' knob and night gain (litGround.w)
+        std::uint32_t lightFrame = 0xffffffffu;
+        unsigned int prog = 0;
+        bool tried = false;
+        std::uint32_t logged = 0; // frames logged (the first few, for the job logs)
+        // The smoke in front of the rain: the frame's smoke and fire puffs on
+        // a coarse screen grid (NoteRainCover, from DrawDecal), for coverFrame.
+        Poseidon::remaster::RainCoverGrid cover;
+        std::uint32_t coverFrame = 0xffffffffu;
+        unsigned int coverTex = 0;
+    } _xpRain;
+    void PostXpRain(const PostFrame& f, bool nightLights);
+    void DestroyXpRain();
+    // A decal (a smoke or fire puff) of this frame, for the rain behind it:
+    // its centre and half size on screen (px), opacity and depth (m). Does
+    // nothing unless the world-space rain is drawing.
+    void NoteRainCover(float x, float y, float sx, float sy, float opacity, float depthM);
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
@@ -1872,6 +1986,7 @@ class EngineGL33 : public Engine
 
     // MSAA alpha-to-coverage (config knob; effective only when the default
     // framebuffer actually got MSAA samples — see _msaaActive).
+    void SetDrawSampleMask(unsigned mask) override;
     void SetAlphaToCoverage(bool enable) override { _alphaToCoverageCfg = enable; }
     bool GetAlphaToCoverage() const override { return _alphaToCoverageCfg && _msaaActive; }
 

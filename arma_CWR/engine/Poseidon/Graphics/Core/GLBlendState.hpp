@@ -64,6 +64,16 @@ inline void ShadowKeepAlpha()
     glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 }
 
+// Premultiplied colour over the frame, its alpha kept: (ONE,
+// ONE_MINUS_SRC_ALPHA) on colour, (ZERO, ONE) on alpha. The shore ribbons
+// (EngineGL33_ShoreRibbons.cpp) lay foam (colour times coverage) and darken
+// the wet sand (no colour, some alpha) in one draw.
+inline void PremultipliedKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
 } // namespace render::blend
 
 } // namespace Poseidon

@@ -16,7 +16,9 @@
 #include <Poseidon/World/Scene/LandFitCache.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 using namespace Poseidon::Dev;
@@ -473,8 +475,10 @@ AbstractTextBank* EngineGL33::TextBank()
 
 void EngineGL33::SetRenderScale(float scale)
 {
-    if (scale < 1.0f)
-        scale = 1.0f;
+    // Below 1: the world draws at that share of the window and the TAA resolve
+    // upsamples it (EX9-WEAK); 1 to 2: supersampling, as before.
+    if (!(scale >= 0.5f))
+        scale = 0.5f;
     if (scale > 2.0f)
         scale = 2.0f;
     _pendingRenderScale = scale;
@@ -509,8 +513,67 @@ void EngineGL33::RenderTargetSize(int& w, int& h) const
         SDL_GetWindowSizeInPixels(_sdlWindow, &w, &h);
 }
 
+namespace
+{
+// EX9-WEAK (Q-4): the world's share of the window, 0.5 to 1 (1: the world
+// draws at the window's size, or above it when supersampling).
+float RenderShare(float value)
+{
+    if (!(value > 0.0f) || value >= 0.995f)
+        return 1.0f;
+    return value < 0.5f ? 0.5f : value;
+}
+
+// POSEIDON_XP_RENDERSCALE=<0.5..1>, a test override of the Render Scale row's
+// share (read once); -1 when unset or empty (the row decides).
+float RenderShareOverride()
+{
+    static const float scale = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_RENDERSCALE");
+        if (!v || !*v)
+            return -1.0f;
+        return RenderShare(static_cast<float>(std::atof(v)));
+    }();
+    return scale;
+}
+} // namespace
+
+void EngineGL33::XpSwapFrameTargets()
+{
+    // The display set and the world's set trade names (see EngineGL33.hpp).
+    std::swap(_ssaaFbo, _xpDispFbo);
+    std::swap(_ssaaColorRb, _xpDispColorRb);
+    std::swap(_ssaaDepthRb, _xpDispDepthRb);
+    std::swap(_ssaaResolveFbo, _xpDispResolveFbo);
+    std::swap(_ssaaResolveRb, _xpDispResolveRb);
+    std::swap(_ssaaW, _xpDispW);
+    std::swap(_ssaaH, _xpDispH);
+    _xpOnDisplay = !_xpOnDisplay;
+}
+
+void EngineGL33::XpDestroyDisplayTarget()
+{
+    if (_xpOnDisplay)
+        XpSwapFrameTargets();
+    if (_xpDispFbo)
+        glDeleteFramebuffers(1, &_xpDispFbo);
+    if (_xpDispResolveFbo)
+        glDeleteFramebuffers(1, &_xpDispResolveFbo);
+    if (_xpDispColorRb)
+        glDeleteRenderbuffers(1, &_xpDispColorRb);
+    if (_xpDispDepthRb)
+        glDeleteRenderbuffers(1, &_xpDispDepthRb);
+    if (_xpDispResolveRb)
+        glDeleteRenderbuffers(1, &_xpDispResolveRb);
+    _xpDispFbo = _xpDispResolveFbo = _xpDispColorRb = _xpDispDepthRb = _xpDispResolveRb = 0;
+    _xpDispW = _xpDispH = 0;
+}
+
 void EngineGL33::DestroySSAATarget()
 {
+    // The world's set first in the frame target's names, then the display set.
+    XpDestroyDisplayTarget();
     if (_ssaaFbo)
         glDeleteFramebuffers(1, &_ssaaFbo);
     if (_ssaaResolveFbo)
@@ -523,12 +586,16 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
     // The surfaces switch's target was attachment 1 of the frame target.
     DestroySurfaceTarget();
+    DestroySeaWaveTarget(); // XP sea mirror: attachment 2
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
 }
 
 void EngineGL33::ApplyPendingRenderScale()
 {
+    // A frame that ended on the display set hands the names back first.
+    if (_xpOnDisplay)
+        XpSwapFrameTargets();
     int winW = _w, winH = _h;
     if (_sdlWindow)
         SDL_GetWindowSizeInPixels(_sdlWindow, &winW, &winH);
@@ -540,10 +607,25 @@ void EngineGL33::ApplyPendingRenderScale()
     // Render tab / GraphicsConfig).  The engine starts with both off until
     // GraphicsConfig applies the user's values at boot (4x MSAA, scale 1 by
     // default).
-    const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
+    const float cfgScale = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
+    float want = cfgScale;
+    // EX9-WEAK (Q-4): a Render Scale below 100% (or POSEIDON_XP_RENDERSCALE,
+    // which wins) draws the world at that share of the configured target; the
+    // TAA resolve upsamples to the configured target's size (the window at
+    // scale 1; with the override at an SSAA scale above 1 the scaled target,
+    // which the window blit then takes down as before: the bench's scale-2
+    // rows, a GPU-bound stand-in for a larger display).
+    const int dispW = static_cast<int>(winW * cfgScale + 0.5f);
+    const int dispH = static_cast<int>(winH * cfgScale + 0.5f);
+    const float share = RenderShareOverride() > 0.0f ? RenderShareOverride() : RenderShare(_pendingRenderScale);
+    if (share < 1.0f)
+        want = cfgScale * share;
     const int sw = static_cast<int>(winW * want + 0.5f);
     const int sh = static_cast<int>(winH * want + 0.5f);
-    if (SSAAActive() && sw == _ssaaW && sh == _ssaaH && want == _renderScale && _pendingMsaaSamples == _msaaSamples)
+    const bool displaySetReady = want >= cfgScale || (_xpDispFbo && _xpDispW == dispW && _xpDispH == dispH) ||
+                                 (_xpDispFailW == dispW && _xpDispFailH == dispH);
+    if (SSAAActive() && sw == _ssaaW && sh == _ssaaH && want == _renderScale && _pendingMsaaSamples == _msaaSamples &&
+        displaySetReady)
         return;
     DestroySSAATarget();
 
@@ -593,6 +675,71 @@ void EngineGL33::ApplyPendingRenderScale()
     _msaaActive = samples > 1;
     LOG_INFO(Graphics, "GL33: frame target {}x{} ({}x MSAA, render scale {}), window {}x{}", sw, sh,
              static_cast<int>(samples), want, winW, winH);
+
+    // EX9-WEAK (Q-4): the display set, window-sized, with the same samples as
+    // the frame target (the HUD draws on it as it draws on the frame target
+    // at scale 1), and its single-sample resolve stage. Cleared once here;
+    // the sharpen writes every colour sample each frame it is used.
+    _xpUpScale = want < cfgScale ? want / cfgScale : 1.0f;
+    if (want < cfgScale)
+    {
+        glGenRenderbuffers(1, &_xpDispColorRb);
+        glBindRenderbuffer(GL_RENDERBUFFER, _xpDispColorRb);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, dispW, dispH);
+        glGenRenderbuffers(1, &_xpDispDepthRb);
+        glBindRenderbuffer(GL_RENDERBUFFER, _xpDispDepthRb);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, dispW, dispH);
+        glGenFramebuffers(1, &_xpDispFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, _xpDispFbo);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _xpDispColorRb);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, _xpDispDepthRb);
+        const GLenum dispStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glGenRenderbuffers(1, &_xpDispResolveRb);
+        glBindRenderbuffer(GL_RENDERBUFFER, _xpDispResolveRb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, dispW, dispH);
+        glGenFramebuffers(1, &_xpDispResolveFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, _xpDispResolveFbo);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _xpDispResolveRb);
+        const GLenum dispResolveStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        if (dispStatus != GL_FRAMEBUFFER_COMPLETE || dispResolveStatus != GL_FRAMEBUFFER_COMPLETE)
+        {
+            LOG_WARN(Graphics,
+                     "GL33: XP render scale display target {}x{} incomplete (0x{:x}/0x{:x}); the TAA "
+                     "resolve does not upsample (the window blit stretches the frame)",
+                     dispW, dispH, dispStatus, dispResolveStatus);
+            XpDestroyDisplayTarget();
+            _xpDispFailW = dispW; // not retried every frame at this size
+            _xpDispFailH = dispH;
+        }
+        else
+        {
+            _xpDispW = dispW;
+            _xpDispH = dispH;
+            // A new target holds undefined pixels: clear both once.
+            const bool scissor = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
+            if (scissor)
+                glDisable(GL_SCISSOR_TEST);
+            for (const GLuint fbo : {_xpDispFbo, _xpDispResolveFbo})
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+                Poseidon::render::pipeline::SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                Poseidon::render::depthstencil::StencilFullWriteMask();
+                Poseidon::render::clear::WithMask(
+                    GL_COLOR_BUFFER_BIT | (fbo == _xpDispFbo ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : 0));
+            }
+            if (scissor)
+                glEnable(GL_SCISSOR_TEST);
+            _ssrStencilValid = false;
+            InvalidatePipelineCache();
+            LOG_INFO(
+                Graphics,
+                "GL33: XP render scale {} of {}: world {}x{}, TAA upsample to {}x{} (display target {}x MSAA, HUD on "
+                "it), window {}x{}",
+                _xpUpScale, cfgScale, sw, sh, dispW, dispH, static_cast<int>(samples), winW, winH);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
 }
 
 void EngineGL33::ResolveSSAAToDefault()
