@@ -349,6 +349,12 @@ struct KeyTable
                         10.0f),
             MakeSubKnob(Feature::PhotoLight, "camLocal", "Night local lights",
                         "lamps, fires and headlights at full night; 1 = as lit", &LT::camLocal, 0.5f, 6.0f),
+            MakeSubKnob(Feature::PhotoLight, "camFlameNight", "Night flame exposure",
+                        "the fire's flames at full night, EV over a daylight exposure", &LT::camFlameNight, -2.0f,
+                        5.0f),
+            MakeSubKnob(Feature::PhotoLight, "camFlameKnee", "Flame clip",
+                        "scene light where the flames' colour channels clip; higher = later yellow and white",
+                        &LT::camFlameKnee, 0.25f, 8.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

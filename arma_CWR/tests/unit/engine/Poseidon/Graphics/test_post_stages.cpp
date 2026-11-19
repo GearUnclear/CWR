@@ -112,7 +112,7 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
     }
     CHECK(names.size() == static_cast<size_t>(kPostStageCount));
     CHECK(marks.size() == static_cast<size_t>(kPostStageCount));
-    CHECK(gpu::kMarkCount <= 32);
+    CHECK(gpu::kMarkCount <= 64);
     // Landed: the passes that existed (resolve, AO, bloom, shafts, composite)
     // plus the linear depth and the debug view that shows it; the TAA resolve
     // and its sharpen; the tag readout and the reflections; the air pass.

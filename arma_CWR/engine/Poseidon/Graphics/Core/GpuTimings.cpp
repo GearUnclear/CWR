@@ -25,6 +25,8 @@ constexpr SectionDef kSections[kSectionCount] = {
     {"skytable", Mark::SkyBegin, Mark::SkyTableEnd},
     {"canopy", Mark::CanopyBegin, Mark::CanopyEnd},
     {"combatmask", Mark::CombatMaskBegin, Mark::CombatMaskEnd},
+    {"flames", Mark::FlamesBegin, Mark::FlamesEnd},
+    {"flamemerge", Mark::FlameMergeBegin, Mark::FlameMergeEnd},
     {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
     {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
     {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
@@ -84,9 +86,9 @@ void GpuTimings::Reset()
     *this = GpuTimings();
 }
 
-void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t recorded)
+void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint64_t recorded)
 {
-    auto has = [recorded](Mark m) { return (recorded >> static_cast<int>(m)) & 1u; };
+    auto has = [recorded](Mark m) { return (recorded >> static_cast<int>(m)) & 1ull; };
     ++_frames;
     for (int i = 0; i < kSectionCount; ++i)
     {
@@ -170,6 +172,8 @@ std::string GpuTimings::Summary() const
         add(Section::SkyTable, " (%s %.2f)");
     add(Section::Canopy, " | %s %.2f");
     add(Section::CombatMask, " | %s %.2f");
+    add(Section::Flames, " | %s %.2f");
+    add(Section::FlameMerge, " (%s %.2f)");
     if (add(Section::Post, " | %s %.2f:"))
     {
         for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)

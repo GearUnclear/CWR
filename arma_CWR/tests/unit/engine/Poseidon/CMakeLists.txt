@@ -269,6 +269,10 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Simulation tests (batch-03)
     World/Simulation/test_animation.cpp
+    World/Simulation/test_fire_followups.cpp
+    World/Simulation/test_fire_objects.cpp
+    World/Simulation/test_fire_spread.cpp
+    World/Simulation/test_plume_no_steps.cpp
 
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp

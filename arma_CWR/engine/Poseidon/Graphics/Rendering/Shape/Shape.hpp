@@ -350,6 +350,7 @@ class Shape: public Poseidon::VertexTable
 	int NProxies() const {return _proxy.Size();}
 	ProxyObject &Proxy(int i) {return *_proxy[i];}
 	const ProxyObject &Proxy(int i) const {return *_proxy[i];}
+	void DeleteProxy(int i) {_proxy.Delete(i);}
 	
 	int NFaces() const {return _face.Size();}
 	int FacesRawSize() const {return _face.RawSize();}
@@ -384,6 +385,9 @@ class Shape: public Poseidon::VertexTable
 	const Plane &GetPlane( int i ) const {return _plane[i];}
 	Plane &GetPlane( int i ) {return _plane[i];}
 	void InitPlanes(); // not all shapes need planes
+	// Planes sized again for the faces there are now (after faces were added),
+	// when the shape keeps planes at all.
+	void RefreshPlanes();
 	
 	const FaceArray &Faces() const {return _face;}
 	FaceArray &Faces() {return _face;}
@@ -872,6 +876,15 @@ class LODShape: public RefCountWithLinks
 	ClipFlags GetAndHints() const {return _andHints;}
 
 	void LockAutoCenter( bool autoCenter ) {_lockAutoCenter=autoCenter;}
+	// What the copy constructor leaves out (DoConstruct): the map type, the
+	// class and dammage properties, occlusion and armour. A copy that stands
+	// in for its source on the map (a burnt shell) needs them.
+	void CopyClassFrom( const LODShape &src )
+	{
+		_mapType=src._mapType; _propertyClass=src._propertyClass; _propertyDammage=src._propertyDammage;
+		_canOcclude=src._canOcclude; _canBeOccluded=src._canBeOccluded;
+		_armor=src._armor; _invArmor=src._invArmor; _logArmor=src._logArmor;
+	}
 	void SetAutoCenter( bool autoCenter ) {_autoCenter=autoCenter;}
 	void AllowAnimation( bool allow=true ) {_allowAnimation=allow;} // non static usage detected
 	bool GetAllowAnimation() const {return _allowAnimation;} // non static usage detected
@@ -887,6 +900,11 @@ class LODShape: public RefCountWithLinks
 	void ScanProperties();
 	void ScanProxies(bool modifyFaces = true);
 	void CalculateMass(); // always use best level
+
+	// (end-state agent, FireShell.cpp) its convex components made again from
+	// its own geometry levels (a copy shares its source's, which read the
+	// source's levels)
+	void RebuildConvexComponents();
 
 	void RecalculateGeomComponents() const {_geomComponents->Recalculate(GeometryLevel());}
 	void InvalidateGeomComponents() {_geomComponents->Invalidate();}

@@ -296,32 +296,54 @@ void EngineGL33::DrawDecalBatch(const TriQueue& triq, int n, int indexOffset)
         GL33Bind::ActiveUnit(0);
         glUniform1f(loc, 1.0f);
         glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+        // ---- Smoke over the flames (fix 02) ----
+        // The batched puffs go into the fire spread's flame cover too, as
+        // FlushQueue's single draws do: without it no puff ever covered the
+        // flames, which were laid over the smoke. A no-op without flames.
+        if (FlameCoverWantedQueue() && BeginFireFlameCover())
+        {
+            glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+            EndFireFlameCover();
+        }
+        // ---- end smoke over the flames ----
         glUniform1f(loc, 0.0f);
         ++Poseidon::gPerfDrawCalls;
         return;
     }
     // No array reader: one draw per run of one texture, the draws of before.
     const Poseidon::render::LegacySpec spec = Poseidon::render::SplitLegacy(triq._special);
-    int drawn = 0;
-    for (int r = 0; r < _decalBatch.runs.Size(); ++r)
+    auto drawRuns = [&](bool count)
     {
-        const db::RunList::Run& run = _decalBatch.runs[r];
-        if (run.first + run.count > n)
-            break;
-        TextureGL33* tex = reinterpret_cast<TextureGL33*>(run.tex);
-        const unsigned int handle = tex ? tex->GetHandle() : 0;
-        if (!GL33Bind::IsTexBound(0, handle))
-            SetTexture(tex, spec);
-        glDrawElements(GL_TRIANGLES, run.count, GL_UNSIGNED_SHORT,
-                       (void*)(intptr_t)((indexOffset + run.first) * sizeof(WORD)));
-        ++Poseidon::gPerfDrawCalls;
-        drawn = run.first + run.count;
-    }
-    if (drawn < n)
+        int drawn = 0;
+        for (int r = 0; r < _decalBatch.runs.Size(); ++r)
+        {
+            const db::RunList::Run& run = _decalBatch.runs[r];
+            if (run.first + run.count > n)
+                break;
+            TextureGL33* tex = reinterpret_cast<TextureGL33*>(run.tex);
+            const unsigned int handle = tex ? tex->GetHandle() : 0;
+            if (!GL33Bind::IsTexBound(0, handle))
+                SetTexture(tex, spec);
+            glDrawElements(GL_TRIANGLES, run.count, GL_UNSIGNED_SHORT,
+                           (void*)(intptr_t)((indexOffset + run.first) * sizeof(WORD)));
+            if (count)
+                ++Poseidon::gPerfDrawCalls;
+            drawn = run.first + run.count;
+        }
+        if (drawn < n)
+        {
+            glDrawElements(GL_TRIANGLES, n - drawn, GL_UNSIGNED_SHORT,
+                           (void*)(intptr_t)((indexOffset + drawn) * sizeof(WORD)));
+            if (count)
+                ++Poseidon::gPerfDrawCalls;
+        }
+    };
+    drawRuns(true);
+    // Smoke over the flames (fix 02): these runs into the flame cover too.
+    if (FlameCoverWantedQueue() && BeginFireFlameCover())
     {
-        glDrawElements(GL_TRIANGLES, n - drawn, GL_UNSIGNED_SHORT,
-                       (void*)(intptr_t)((indexOffset + drawn) * sizeof(WORD)));
-        ++Poseidon::gPerfDrawCalls;
+        drawRuns(false);
+        EndFireFlameCover();
     }
 }
 

@@ -17,14 +17,14 @@ namespace
 struct Frame
 {
     std::uint64_t stamps[kMarkCount] = {};
-    std::uint32_t recorded = 0;
+    std::uint64_t recorded = 0;
 
     void Set(Mark m, double ms)
     {
         stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(static_cast<std::int64_t>(1e9 + ms * 1e6));
-        recorded |= 1u << static_cast<int>(m);
+        recorded |= 1ull << static_cast<int>(m);
     }
-    void Drop(Mark m) { recorded &= ~(1u << static_cast<int>(m)); }
+    void Drop(Mark m) { recorded &= ~(1ull << static_cast<int>(m)); }
 };
 
 // A frame of today's post pass: resolve, AO, bloom, shafts, composite.
@@ -90,7 +90,7 @@ TEST_CASE("GpuTimings: every post stage has its mark and section, in run order",
 {
     // The stage marks are contiguous after WorldEnd and the stage sections
     // follow them one for one, so each section runs from the stage before it.
-    CHECK(kMarkCount <= 32);
+    CHECK(kMarkCount <= 64);
     CHECK(static_cast<int>(Mark::ResolveEnd) == static_cast<int>(Mark::WorldEnd) + 1);
     CHECK(static_cast<int>(Mark::PostEnd) == static_cast<int>(Mark::DebugViewEnd) + 1);
     std::set<std::string> names;

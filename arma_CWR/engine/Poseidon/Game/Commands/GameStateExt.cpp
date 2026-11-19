@@ -1498,6 +1498,7 @@ static const GameOperator* GetExtBinary(int& count)
 }
 
 #include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 
 INIT_MODULE(GameStateExt, 2)
 {
@@ -1532,6 +1533,8 @@ INIT_MODULE(GameStateExt, 2)
     {
         GGameState.NewNularOp(ExtNular[i]);
     }
+    // FIRE-SPREAD explore lane: only when POSEIDON_XP_FIRESPREAD is set.
+    firespread::RegisterScriptCommands();
 };
 
 // Out-of-line: these touch OLink<AIGroup>/<Object>, needing the complete types.

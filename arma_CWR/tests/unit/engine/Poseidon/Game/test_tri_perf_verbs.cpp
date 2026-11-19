@@ -139,11 +139,11 @@ std::string LastField(const std::string& line)
 struct GpuFrame
 {
     std::uint64_t stamps[gpu::kMarkCount] = {};
-    std::uint32_t recorded = 0;
+    std::uint64_t recorded = 0;
     void Set(gpu::Mark m, double ms)
     {
         stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(1e9 + ms * 1e6);
-        recorded |= 1u << static_cast<int>(m);
+        recorded |= 1ull << static_cast<int>(m);
     }
 };
 
@@ -222,7 +222,7 @@ TEST_CASE("GpuFrameRing: one record per read-back frame, empty where unmeasured"
     t.Submit(a.stamps, a.recorded);
     ring.Push(t);
     GpuFrame b = WorldFrame(2.0);
-    b.recorded &= ~(1u << static_cast<int>(gpu::Mark::PostEnd)); // no post pass this frame
+    b.recorded &= ~(1ull << static_cast<int>(gpu::Mark::PostEnd)); // no post pass this frame
     t.Submit(b.stamps, b.recorded);
     ring.Push(t);
     REQUIRE(ring.Count() == 2);

@@ -468,6 +468,40 @@ Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& in)
     return Rgb(roll(ratio.r), roll(ratio.g), roll(ratio.b)) * y;
 }
 
+// ---- The fire spread's flames ---------------------------------------------------
+
+float FlameDark(float dusk, float night)
+{
+    return kFlameDarkDusk * Clamp01(dusk) + (1.0f - kFlameDarkDusk) * Clamp01(night);
+}
+
+float FlameExposureLog2(float cameraLog2, float dark, float camEv, float camFlameNight)
+{
+    const float ref = std::log2(kMiddleGrey) - kDaylightMeanLog2 + camEv + camFlameNight;
+    return cameraLog2 + Clamp01(dark) * std::max(ref - cameraLog2, 0.0f);
+}
+
+float FlameKneeCurve(float u)
+{
+    constexpr float a = kFlameKneeSoft;
+    if (!(u > a))
+        return u;
+    return 1.0f - (1.0f - a) * (1.0f - a) / (u - 2.0f * a + 1.0f);
+}
+
+Rgb FlameFilm(const Rgb& light, float knee)
+{
+    const Rgb c(std::max(light.r, 0.0f), std::max(light.g, 0.0f), std::max(light.b, 0.0f));
+    const float peak = MaxOf(c);
+    if (!(knee > 0.0f) || !(peak > kFlameKneeSoft * knee))
+        return c;
+    const Rgb u = c * (1.0f / knee);
+    const float spill =
+        kFlameSpill * (std::max(u.r - 1.0f, 0.0f) + std::max(u.g - 1.0f, 0.0f) + std::max(u.b - 1.0f, 0.0f));
+    const Rgb f(FlameKneeCurve(u.r + spill), FlameKneeCurve(u.g + spill), FlameKneeCurve(u.b + spill));
+    return f * (peak / MaxOf(f));
+}
+
 // ---- Colour -------------------------------------------------------------------
 
 Rgb Mat3::Apply(const Rgb& c) const

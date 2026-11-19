@@ -92,6 +92,29 @@ IWave* SoundScene::Open(const char* filename, bool is3D, bool accom)
     }
     return wave;
 }
+IWave* SoundScene::OpenMemory(const void* data, size_t size, const char* ext, bool is3D, bool accom)
+{
+    IWave* wave = GSoundsys ? GSoundsys->CreateWaveFromMemory(data, size, ext, is3D) : nullptr;
+    if (!wave)
+    {
+        return wave;
+    }
+    if (is3D)
+    {
+        _all3DSounds.Add(wave);
+    }
+    else
+    {
+        _all2DSounds.Add(wave);
+    }
+    wave->EnableAccommodation(accom);
+    if (accom)
+    {
+        wave->SetAccommodation(_earAccommodation * _soundVolume);
+    }
+    return wave;
+}
+
 void SoundScene::AddSound(IWave* wave)
 {
     if (wave)

@@ -92,3 +92,37 @@ set_target_properties(PoseidonGame PROPERTIES
 
 include(${CMAKE_SOURCE_DIR}/cmake/DistCopy.cmake)
 dist_copy(PoseidonGame)
+
+# The fire spread's flame flipbooks, one a style (POSEIDON_XP_FIRESPREAD;
+# engine/PoseidonGL33/EngineGL33_FireFlames.cpp loads fx/flame_<style>.png
+# beside the executable, a missing style takes another's, and it draws
+# procedural flames without any). Made by tools/firespread/gen_flame_flipbook.py.
+foreach(_flame_style front tongues creep bushy)
+    set(_flame_book "${CMAKE_SOURCE_DIR}/tools/firespread/flame_${_flame_style}.png")
+    if(EXISTS "${_flame_book}")
+        add_custom_command(TARGET PoseidonGame POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:PoseidonGame>/fx ${DIST_DIR}/fx
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_flame_book}
+                    $<TARGET_FILE_DIR:PoseidonGame>/fx/flame_${_flame_style}.png
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_flame_book} ${DIST_DIR}/fx/flame_${_flame_style}.png
+            COMMENT "Copying the ${_flame_style} flame flipbook beside PoseidonGame"
+            VERBATIM
+        )
+    endif()
+endforeach()
+
+# The fire spread's sounds (POSEIDON_XP_FIRESPREAD; FireSpreadWorld.cpp
+# FireSound loads fx/fire_*.ogg beside the executable, and the fire is silent
+# without them). Made by tools/firespread/gen_fire_sounds.py.
+foreach(_fire_sound fire_crackle_loop fire_roar_loop fire_pop_1 fire_pop_2 fire_pop_3 fire_pop_4 fire_pop_5 fire_pop_6)
+    set(_fire_ogg "${CMAKE_SOURCE_DIR}/tools/firespread/${_fire_sound}.ogg")
+    if(EXISTS "${_fire_ogg}")
+        add_custom_command(TARGET PoseidonGame POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:PoseidonGame>/fx ${DIST_DIR}/fx
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_fire_ogg} $<TARGET_FILE_DIR:PoseidonGame>/fx/${_fire_sound}.ogg
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_fire_ogg} ${DIST_DIR}/fx/${_fire_sound}.ogg
+            COMMENT "Copying the ${_fire_sound} fire sound beside PoseidonGame"
+            VERBATIM
+        )
+    endif()
+endforeach()

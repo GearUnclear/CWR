@@ -38,6 +38,14 @@ enum class Mark : int
     // world's first pass of a frame that shadows a combat light.
     CombatMaskBegin,
     CombatMaskEnd,
+    // The fire spread's flame sheets (POSEIDON_XP_FIRESPREAD), at the start
+    // of the translucent objects in the frames that have flames.
+    FlamesBegin,
+    FlamesEnd,
+    // ... and their merge into the frame in the post pass (the linear light
+    // target onto the decoded frame, before the glow stages and the camera).
+    FlameMergeBegin,
+    FlameMergeEnd,
     WorldBegin, // first 3D pass of the world
     // Inside the world pass (Landscape::DrawRect, at its existing queue
     // flushes): the sky, terrain, water and horizon drawn; the opaque objects
@@ -83,6 +91,8 @@ enum class Section : int
     SkyTable,   // the sky-view table build (frames that rebuild it)
     Canopy,     // the canopy's sun-visibility map build (frames that rebuild it)
     CombatMask, // the combat shadow mask's trace and blur (frames that shadow a combat light)
+    Flames,     // the fire spread's flame sheets (frames with flames; inside the world's rest)
+    FlameMerge, // their merge into the frame (frames with flames; inside the post pass)
     // One per post stage, in Mark order: from the end of the latest stage that
     // ran before it (or WorldEnd) to its own end.
     Resolve,
@@ -104,8 +114,8 @@ enum class Section : int
 
 constexpr int kMarkCount = static_cast<int>(Mark::Count);
 constexpr int kSectionCount = static_cast<int>(Section::Count);
-// The backend records a frame's marks in a 32-bit mask.
-static_assert(kMarkCount <= 32, "GpuTimings records the marks of a frame in a 32-bit mask");
+// The backend records a frame's marks in a 64-bit mask.
+static_assert(kMarkCount <= 64, "GpuTimings records the marks of a frame in a 64-bit mask");
 // One post stage section per post stage mark, in the same order.
 constexpr int kPostStageMarks = static_cast<int>(Mark::DebugViewEnd) - static_cast<int>(Mark::ResolveEnd) + 1;
 static_assert(static_cast<int>(Section::DebugView) - static_cast<int>(Section::Resolve) + 1 == kPostStageMarks,
@@ -131,7 +141,7 @@ class GpuTimings
   public:
     // stamps[i] is valid when bit i of `recorded` is set (nanoseconds, any
     // common origin). Frames that never reached FrameEnd are still used.
-    void Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t recorded);
+    void Submit(const std::uint64_t stamps[kMarkCount], std::uint64_t recorded);
     void Reset();
 
     // Smoothed duration in milliseconds; false while the section has never

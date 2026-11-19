@@ -207,14 +207,14 @@ void EngineGL33::GpuFrameBegin()
         glGenQueries(kGpuFrames * kMarkCount, &_gpuQueries[0][0]);
     _gpuSlot = (_gpuSlot + 1) % kGpuFrames;
     // The slot about to be reused holds the frame issued kGpuFrames ago.
-    const std::uint32_t issued = _gpuRecorded[_gpuSlot];
+    const std::uint64_t issued = _gpuRecorded[_gpuSlot];
     if (issued)
     {
         std::uint64_t stamps[kMarkCount] = {};
-        std::uint32_t read = 0;
+        std::uint64_t read = 0;
         for (int m = 0; m < kMarkCount; ++m)
         {
-            if (!((issued >> m) & 1u))
+            if (!((issued >> m) & 1ull))
                 continue;
             GLint available = 0;
             glGetQueryObjectiv(_gpuQueries[_gpuSlot][m], GL_QUERY_RESULT_AVAILABLE, &available);
@@ -223,7 +223,7 @@ void EngineGL33::GpuFrameBegin()
             GLuint64 value = 0;
             glGetQueryObjectui64v(_gpuQueries[_gpuSlot][m], GL_QUERY_RESULT, &value);
             stamps[m] = value;
-            read |= 1u << m;
+            read |= 1ull << m;
         }
         if (s_gpuDropSlots & (1u << _gpuSlot))
             s_gpuDropSlots &= ~(1u << _gpuSlot);
@@ -253,10 +253,10 @@ void EngineGL33::GpuMark(Mark mark)
     if (!_gpuTiming || !_gpuQueries[0][0])
         return;
     const int m = static_cast<int>(mark);
-    if ((_gpuRecorded[_gpuSlot] >> m) & 1u)
+    if ((_gpuRecorded[_gpuSlot] >> m) & 1ull)
         return; // the first occurrence in a frame counts
     glQueryCounter(_gpuQueries[_gpuSlot][m], GL_TIMESTAMP);
-    _gpuRecorded[_gpuSlot] |= 1u << m;
+    _gpuRecorded[_gpuSlot] |= 1ull << m;
     if (s_pipeActive)
         PipeAtMark(_gpuSlot, mark);
 }

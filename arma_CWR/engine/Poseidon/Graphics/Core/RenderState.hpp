@@ -9,6 +9,7 @@
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <cstdint>
+#include <cstring>
 
 // Per-frame camera/environment state — changes once per frame.
 
@@ -26,6 +27,20 @@ struct FrameState
     float sunDir[4] = {};          // sun direction (xyz, w=0)
     bool sunEnabled = false;
 };
+
+// (smoketrim) Two frame states alike in everything a world pass is set up
+// from (EngineGL33::BeginPass keeps its set-up for the same frame state).
+inline bool SameFrameState(const FrameState& a, const FrameState& b)
+{
+    return std::memcmp(&a.view, &b.view, sizeof(a.view)) == 0 &&
+           std::memcmp(&a.projection, &b.projection, sizeof(a.projection)) == 0 &&
+           std::memcmp(&a.viewProjection, &b.viewProjection, sizeof(a.viewProjection)) == 0 &&
+           std::memcmp(a.cameraPos, b.cameraPos, sizeof(a.cameraPos)) == 0 &&
+           std::memcmp(a.viewport, b.viewport, sizeof(a.viewport)) == 0 &&
+           std::memcmp(a.fogParams, b.fogParams, sizeof(a.fogParams)) == 0 &&
+           std::memcmp(a.fogColor, b.fogColor, sizeof(a.fogColor)) == 0 &&
+           std::memcmp(a.sunDir, b.sunDir, sizeof(a.sunDir)) == 0 && a.sunEnabled == b.sunEnabled;
+}
 
 enum class BlendModeV4
 {

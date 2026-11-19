@@ -27,6 +27,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
@@ -34,6 +35,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 using namespace Poseidon::gl33lighting;
 namespace rm = Poseidon::remaster;
@@ -66,6 +68,316 @@ void SetSlot(int slot, float x, float y, float z, float w)
     p[1] = y;
     p[2] = z;
     p[3] = w;
+}
+
+// The fire spread's scorched ground on kBurnMapUnit (UploadLitBurn): an R32F
+// atlas s_burnAtlasW x s_burnAtlasH holding, row band after row band, the
+// burn map, the land's height grid (BurnMapView::groundY) and the firelight's
+// two heat grids (BuildFireHeat), then the plants' own fire (the plant table,
+// FireSpreadWorld.hpp PlantTable, its row band last), and the versions of the
+// parts it holds. 0 until the fire has burnt (POSEIDON_XP_FIRESPREAD); nothing
+// is made or bound while it is off. One texture so the object program, which
+// reads all of them, stays within 16 samplers.
+GLuint s_burnTex = 0;
+int s_burnAtlasW = 0;
+int s_burnAtlasH = 0;
+unsigned s_burnVersion = 0;
+unsigned s_burnGroundVersion = 0;
+unsigned s_burnPlantVersion = 0;
+
+// ---- Firelight on the ground (the fire spread; the shaders' burnFireLight) ----
+// The shaders read the flames' light on the ground from two heat grids at
+// half the burn map's resolution (one texel per two burn texels), built here
+// every frame from the fire's light cells (FireSpreadWorld.hpp
+// GetFlameLightCells: each cell's flames as drawn, followed over a second or
+// two and flickered), never from the burn map's window (the ignition line's
+// cells sit in theirs for minutes after their flames are out):
+//   - the ember grid: each texel its cell's ash glow (0..1) on the rig's
+//     scale of a lux (below), over the cell's square;
+//   - the halo grid: the light each texel takes from the flames round it,
+//     HaloLux of every cell's candela summed (the near field of a low flame
+//     wall at a grazing angle, which the fire's block lights leave out), out
+//     to kHaloReachM whatever the texel, cut by the land between (a receiver
+//     behind a rise between it and the flame takes none), on the rig's scale.
+// The scale is the fire's light's (CombatLights.hpp kWildfireRigPerLux times
+// CombatTuning::wildfire, the night's gain), so the shaders take both as
+// scene light, lit and exposed with the frame.
+// Only the rows the fire's cells reach are rebuilt and sent, so the cost
+// follows the flames, not the window.
+constexpr float kFireFlameLiftM = 1.0f;     // the light leaves the flames this high above their ground (m) ...
+constexpr float kFireReceiverLiftM = 0.5f;  // ... and is taken this high above the receiver's
+constexpr float kFireOcclusionSoftM = 1.0f; // land this much above the line between them cuts it off (m)
+constexpr float kFireHaloMinCd = 100.0f;    // a cell this dim lights no halo
+std::vector<float> s_fireHeat;              // heat rows: the ember grid, then the halo grid, side by side
+std::vector<float> s_fireHeatGround;        // the land under each heat texel (m), for the hills
+int s_heatN = 0;                            // the grids' size, and the window they were built for
+float s_heatX0 = 0.0f, s_heatZ0 = 0.0f, s_heatStep = 0.0f;
+unsigned s_heatGroundVersion = 0;
+int s_heatRows[2] = {0, -1}; // the rows written last frame (j0..j1; j1 < j0: none)
+
+// The land's height (m) at world (x, z) from the burn window's height grid
+// (bilinear between its samples at the squares' centres).
+float FireGroundAt(const Poseidon::firespread::BurnMapView& burn, float x, float z)
+{
+    const int n = burn.groundSize;
+    const float step = static_cast<float>(burn.size) * burn.texelM / static_cast<float>(n);
+    const float gx = std::clamp((x - burn.x0) / step - 0.5f, 0.0f, static_cast<float>(n - 1));
+    const float gz = std::clamp((z - burn.z0) / step - 0.5f, 0.0f, static_cast<float>(n - 1));
+    const int i0 = static_cast<int>(gx), j0 = static_cast<int>(gz);
+    const int i1 = std::min(i0 + 1, n - 1), j1 = std::min(j0 + 1, n - 1);
+    const float fx = gx - static_cast<float>(i0), fz = gz - static_cast<float>(j0);
+    const float* g = burn.groundY;
+    const float a = g[j0 * n + i0] + (g[j0 * n + i1] - g[j0 * n + i0]) * fx;
+    const float b = g[j1 * n + i0] + (g[j1 * n + i1] - g[j1 * n + i0]) * fx;
+    return a + (b - a) * fz;
+}
+
+// Fills s_fireHeat (heatN rows of 2 heatN: the ember grid, then the halo grid)
+// from the fire's light cells (each `cellM` square) over the burn window,
+// `scale` the rig's per lux; `ground`: the height grid is there to find
+// hills in. The rows written (rows[0]..rows[1]) are the cells' reach;
+// everything else is left at 0 (the caller clears last frame's rows first).
+void BuildFireHeat(const Poseidon::firespread::BurnMapView& burn, int heatN, bool ground,
+                   const Poseidon::firespread::FlameLightView& cells, float scale, int rows[2])
+{
+    namespace fs = Poseidon::firespread;
+    const std::size_t row = 2 * static_cast<std::size_t>(heatN);
+    float* ember = s_fireHeat.data();
+    float* halo = s_fireHeat.data() + heatN;
+    const float step = 2.0f * burn.texelM; // a heat texel (m)
+    rows[0] = heatN;
+    rows[1] = -1;
+    if (ground && (s_fireHeatGround.size() != static_cast<std::size_t>(heatN) * heatN ||
+                   s_heatGroundVersion != burn.groundVersion))
+    {
+        s_fireHeatGround.resize(static_cast<std::size_t>(heatN) * heatN);
+        for (int j = 0; j < heatN; ++j)
+            for (int i = 0; i < heatN; ++i)
+                s_fireHeatGround[static_cast<std::size_t>(j) * heatN + i] =
+                    FireGroundAt(burn, burn.x0 + (i + 0.5f) * step, burn.z0 + (j + 0.5f) * step);
+        s_heatGroundVersion = burn.groundVersion;
+    }
+    auto groundAt = [&](int i, int j)
+    {
+        return s_fireHeatGround[static_cast<std::size_t>(std::clamp(j, 0, heatN - 1)) * heatN +
+                                std::clamp(i, 0, heatN - 1)];
+    };
+    const int radius = static_cast<int>(std::ceil(fs::kHaloReachM / step));
+    const float halfCell = 0.5f * std::max(cells.cellM, step);
+    for (int c = 0; c < cells.count; ++c)
+    {
+        const fs::FlameLightCell& fc = cells.cells[c];
+        // the cell's centre in texels (0.5 at the first texel's centre), the nearest texel
+        const float gx = (fc.x - burn.x0) / step, gz = (fc.z - burn.z0) / step;
+        const int ci = static_cast<int>(std::floor(gx)), cj = static_cast<int>(std::floor(gz));
+        if (ci < -radius || cj < -radius || ci >= heatN + radius || cj >= heatN + radius)
+            continue;
+        // The ash's glow over the texels whose centres lie in the cell's
+        // square (at least the nearest).
+        if (fc.ember > 0.0f)
+        {
+            const int i0 = static_cast<int>(std::lround(gx - halfCell / step)),
+                      i1 = std::max(i0, static_cast<int>(std::lround(gx + halfCell / step)) - 1);
+            const int j0 = static_cast<int>(std::lround(gz - halfCell / step)),
+                      j1 = std::max(j0, static_cast<int>(std::lround(gz + halfCell / step)) - 1);
+            for (int j = std::max(j0, 0); j <= std::min(j1, heatN - 1); ++j)
+                for (int i = std::max(i0, 0); i <= std::min(i1, heatN - 1); ++i)
+                {
+                    float& e = ember[static_cast<std::size_t>(j) * row + i];
+                    e = std::max(e, std::min(fc.ember, 1.0f) * scale);
+                    rows[0] = std::min(rows[0], j);
+                    rows[1] = std::max(rows[1], j);
+                }
+        }
+        if (fc.cd < kFireHaloMinCd)
+            continue;
+        // The halo: its light on every texel within kHaloReachM.
+        const float sy = ground ? groundAt(ci, cj) + kFireFlameLiftM : 0.0f;
+        for (int j = std::max(cj - radius, 0); j <= std::min(cj + radius, heatN - 1); ++j)
+            for (int i = std::max(ci - radius, 0); i <= std::min(ci + radius, heatN - 1); ++i)
+            {
+                const float rx = burn.x0 + (i + 0.5f) * step, rz = burn.z0 + (j + 0.5f) * step;
+                const float dx = rx - fc.x, dz = rz - fc.z;
+                const float r = std::sqrt(dx * dx + dz * dz);
+                float lux = fs::HaloLux(fc.cd, r);
+                if (lux <= 0.0f)
+                    continue;
+                if (ground && r > 0.5f * step)
+                {
+                    // The land half way between (its nearest texel): above the
+                    // line from the flames to the receiver it hides them.
+                    const float ry = groundAt(i, j) + kFireReceiverLiftM;
+                    const float mid = groundAt((ci + i) / 2, (cj + j) / 2);
+                    lux *= std::clamp(1.0f - (mid - 0.5f * (sy + ry)) / kFireOcclusionSoftM, 0.0f, 1.0f);
+                }
+                halo[static_cast<std::size_t>(j) * row + i] += lux * scale;
+                rows[0] = std::min(rows[0], j);
+                rows[1] = std::max(rows[1], j);
+            }
+    }
+}
+
+// The scorched ground for this frame: litBurnRect, litBurnGround and
+// litBurnHeat, and the atlas on its unit: the burn map and the land's heights
+// re-uploaded only when they or the window changed, the heat grids' rows the
+// fire's light reaches every frame (BuildFireHeat), the plant table when it
+// changed. With the fire off or nothing burnt yet the slots stay zero and
+// nothing is bound, so every fragment is as before. True while the atlas is
+// bound. litBurnRect.w is 1 plus the day (0 by night to 1 by day, by the sun's
+// elevation, kBurnDayLoDeg to kBurnDayHiDeg): the shell's glow reads by dusk
+// and night and is faint by day (burnBuilding).
+constexpr float kBurnDayLoDeg = -4.0f, kBurnDayHiDeg = 8.0f;
+bool UploadLitBurn(float sunElevationDeg)
+{
+    Poseidon::firespread::BurnMapView burn;
+    if (!Poseidon::firespread::GetBurnMap(burn) || !burn.texels || burn.size <= 0 || burn.texelM <= 0.0f)
+    {
+        SetSlot(LitConst::BurnRect, 0.0f, 0.0f, 0.0f, 0.0f);
+        SetSlot(LitConst::BurnGround, 0.0f, 0.0f, 0.0f, 0.0f);
+        SetSlot(LitConst::BurnHeat, 0.0f, 0.0f, 0.0f, 0.0f);
+        return false;
+    }
+    const int groundSize = burn.groundY && burn.groundSize > 0 && burn.groundSize <= burn.size ? burn.groundSize : 0;
+    const int heatN = burn.size / 2;
+    const int w = burn.size;
+    const int heatRow = burn.size + groundSize;
+    // The plant table's rows after the heat rows (kPlantSlotsPerRow slots of
+    // kPlantSlotFloats texels a row: the atlas's width).
+    namespace fs = Poseidon::firespread;
+    const int plantRows = burn.plants && burn.plantSlots > 0 && w == fs::kPlantSlotsPerRow * fs::kPlantSlotFloats
+                              ? burn.plantSlots / fs::kPlantSlotsPerRow
+                              : 0;
+    const int plantRow = heatRow + heatN;
+    const int h = plantRow + plantRows;
+    // Created, filled and kept on its own unit (nothing else binds it), so
+    // the upload unit's cached binding stays true.
+    GL33Bind::ActiveUnit(kBurnMapUnit);
+    if (!s_burnTex)
+    {
+        glGenTextures(1, &s_burnTex);
+        s_burnAtlasW = 0;
+        s_burnAtlasH = 0;
+    }
+    glBindTexture(GL_TEXTURE_2D, s_burnTex);
+    const bool fresh = s_burnAtlasW != w || s_burnAtlasH != h;
+    const bool groundNew = groundSize > 0 && s_burnGroundVersion != burn.groundVersion;
+    if (fresh || s_burnVersion != burn.version || groundNew)
+    {
+        GLint alignment = 4;
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        if (fresh)
+        {
+            // The ground rows' columns past the grid are never read (the
+            // shaders clamp into the grid), so the storage starts unfilled.
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            s_burnAtlasW = w;
+            s_burnAtlasH = h;
+        }
+        // The bytes arrive normalised (0..1), the heights as they are (m).
+        if (fresh || s_burnVersion != burn.version)
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, burn.size, GL_RED, GL_UNSIGNED_BYTE, burn.texels);
+        if (groundSize > 0 && (fresh || groundNew))
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, burn.size, groundSize, groundSize, GL_RED, GL_FLOAT, burn.groundY);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
+        s_burnVersion = burn.version;
+        s_burnGroundVersion = burn.groundVersion;
+    }
+    // The heat grids, every frame: last frame's rows cleared, this frame's
+    // light splatted, the rows of both sent (all of them when the atlas or
+    // the window is new). Float rows are four-byte aligned whatever the
+    // unpack alignment.
+    if (heatN > 0)
+    {
+        const std::size_t row = 2 * static_cast<std::size_t>(heatN);
+        const float step = 2.0f * burn.texelM;
+        const bool window = fresh || s_heatN != heatN || s_heatX0 != burn.x0 || s_heatZ0 != burn.z0 ||
+                            s_heatStep != step || s_fireHeat.size() != static_cast<std::size_t>(heatN) * row;
+        if (window)
+        {
+            s_fireHeat.assign(static_cast<std::size_t>(heatN) * row, 0.0f);
+            s_heatN = heatN;
+            s_heatX0 = burn.x0;
+            s_heatZ0 = burn.z0;
+            s_heatStep = step;
+            s_heatGroundVersion = burn.groundVersion + 1u; // rebuild the land under the texels
+            s_heatRows[0] = 0;
+            s_heatRows[1] = -1;
+        }
+        else if (s_heatRows[1] >= s_heatRows[0])
+            std::fill(s_fireHeat.begin() + static_cast<std::ptrdiff_t>(s_heatRows[0] * row),
+                      s_fireHeat.begin() + static_cast<std::ptrdiff_t>((s_heatRows[1] + 1) * row), 0.0f);
+        Poseidon::firespread::FlameLightView cells;
+        int rows[2] = {heatN, -1};
+        const float scale = Poseidon::lighting::kWildfireRigPerLux *
+                            std::max(Poseidon::lighting::GCombatLights().Tuning().wildfire, 0.0f);
+        if (Poseidon::firespread::GetFlameLightCells(cells) && scale > 0.0f)
+            BuildFireHeat(burn, heatN, groundSize > 0, cells, scale, rows);
+        int j0 = window ? 0 : std::min(rows[0], s_heatRows[0]);
+        int j1 = window ? heatN - 1 : std::max(rows[1], s_heatRows[1]);
+        if (j1 >= j0)
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, heatRow + j0, 2 * heatN, j1 - j0 + 1, GL_RED, GL_FLOAT,
+                            s_fireHeat.data() + static_cast<std::size_t>(j0) * row);
+        s_heatRows[0] = rows[0];
+        s_heatRows[1] = rows[1];
+    }
+    // The plants' own fire: its table as it stands (its times run on in the
+    // shader between uploads).
+    if (plantRows > 0 && (fresh || s_burnPlantVersion != burn.plantVersion))
+    {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, plantRow, w, plantRows, GL_RED, GL_FLOAT, burn.plants);
+        s_burnPlantVersion = burn.plantVersion;
+    }
+    GL33Bind::ActiveUnit(0);
+    const float dayT = std::clamp((sunElevationDeg - kBurnDayLoDeg) / (kBurnDayHiDeg - kBurnDayLoDeg), 0.0f, 1.0f);
+    const float day = dayT * dayT * (3.0f - 2.0f * dayT);
+    SetSlot(LitConst::BurnRect, burn.x0, burn.z0, 1.0f / (static_cast<float>(burn.size) * burn.texelM), 1.0f + day);
+    SetSlot(LitConst::BurnGround, static_cast<float>(burn.size) / static_cast<float>(h), static_cast<float>(groundSize),
+            1.0f / static_cast<float>(w), 1.0f / static_cast<float>(h));
+    // The embers' crawl clock: the fire's own (it stops while paused),
+    // wrapped at 100 turns so the shaders' sines keep their precision (the
+    // plant table's times are wrapped the same, fs::kPlantClockWrap); the burn
+    // map's clock when nothing flames. w: the plant table's first row.
+    Poseidon::firespread::FlameView flames;
+    const float clock = Poseidon::firespread::GetFlames(flames)
+                            ? std::fmod(flames.time, 628.31853f)
+                            : static_cast<float>(std::fmod(burn.clock, fs::kPlantClockWrap));
+    SetSlot(LitConst::BurnHeat, static_cast<float>(heatN), static_cast<float>(heatRow) / static_cast<float>(h), clock,
+            static_cast<float>(plantRows > 0 ? plantRow : 0));
+    return true;
+}
+
+// The fire spread's plume shadow on the sun (litPlumeInfo, litPlume; the
+// shaders' plumeSunVisibility): up to 8 soft blobs along the plume, from the
+// fire's puffs (FireSpreadWorld.hpp GetPlumeShadow). With no plume the slots
+// stay zero, which leaves every fragment as before.
+constexpr float kPlumeShadowGain = 1.0f;
+void UploadLitPlume()
+{
+    Poseidon::firespread::PlumeShadowView plume;
+    const bool on = Poseidon::firespread::GetPlumeShadow(plume) && plume.count > 0;
+    const int n = on ? std::min(plume.count, LitConst::PlumeShadowSlots / 2) : 0;
+    SetSlot(LitConst::PlumeInfo, static_cast<float>(n), n > 0 ? kPlumeShadowGain : 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < LitConst::PlumeShadowSlots / 2; ++i)
+    {
+        if (i < n)
+        {
+            const Poseidon::firespread::PlumeShadowBlob& b = plume.blobs[i];
+            SetSlot(LitConst::PlumeShadow + 2 * i, b.x, b.z, b.y, b.tau);
+            SetSlot(LitConst::PlumeShadow + 2 * i + 1, std::max(b.alongM, 1.0f), std::max(b.acrossM, 1.0f), b.dirX,
+                    b.dirZ);
+        }
+        else
+        {
+            SetSlot(LitConst::PlumeShadow + 2 * i, 0.0f, 0.0f, 0.0f, 0.0f);
+            SetSlot(LitConst::PlumeShadow + 2 * i + 1, 1.0f, 1.0f, 0.0f, 1.0f);
+        }
+    }
 }
 
 GLuint MakeDummyTexture(GLenum target, GLenum internalFormat, GLenum format, GLenum type, const void* texel)
@@ -172,6 +484,11 @@ void EngineGL33::InitLightingResources()
     // array there and leaves it, complete, for the next).
     GL33Bind::ActiveUnit(kDecalLayerUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyHorizonTex);
+    // And for the scorched ground's unit 17, which the land, grass and
+    // object programs declare but read only while the fire's atlas is bound
+    // there (UploadLitBurn): black, nothing burnt.
+    GL33Bind::ActiveUnit(kBurnMapUnit);
+    glBindTexture(GL_TEXTURE_2D, _post.blackTex);
     GL33Bind::ActiveUnit(0);
     // The sky table's unit 8, the clouds' unit 9 and the canopy's units 10 and
     // 15 get their stand-ins the same way.
@@ -488,6 +805,11 @@ void EngineGL33::DeinitLightingResources()
     delTex(_dummyGroundTex);
     delTex(_post.whiteTex);
     delTex(_post.blackTex);
+    delTex(s_burnTex);
+    s_burnAtlasW = 0;
+    s_burnAtlasH = 0;
+    _burnDraws = false;
+    DeinitFireFlames();
     DeinitSkyTable();
     DeinitLightTiles();
     DeinitSkyClouds();
@@ -785,6 +1107,15 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
             ct.twilight = fl::CombatTwilight(in.sunElevationDeg);
         }
         ct.scatter = _lighting.combatScatter;
+        // The fire spread's light against the sky (WildfireLightGain), held
+        // under the photoreal camera to its night look on screen: the camera
+        // may expose this frame up to `headroom` times brighter than a night.
+        {
+            const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+            const float maxE = rm::kExposureMaxLog2 + (rm::kExposureNightMaxLog2 - rm::kExposureMaxLog2) * camNight;
+            const float headroom = std::exp2(maxE - rm::kExposureNightMaxLog2);
+            ct.wildfire = fl::WildfireLightGain(in.sunElevationDeg, _camera.frameOn, in.nightEffect, headroom);
+        }
         fl::CombatLightSet& combat = fl::GCombatLights();
         combat.Evaluate(ct, _combat.night);
         const Vector3 cam = camera ? camera->Position() : VZero;
@@ -1131,6 +1462,13 @@ void EngineGL33::UploadLitFrameConstants()
     // spherical harmonics, the canopy's sky occlusion and the specular; zero
     // while the switch or its gate is off.
     UploadLitSurface(rig, in.skyThrough);
+    // The fire spread's scorched ground (POSEIDON_XP_FIRESPREAD): zero while
+    // it is off or nothing has burnt, which leaves every fragment as before;
+    // while it is bound the object draws carry their char class too
+    // (ApplySurfaceClass).
+    _burnDraws = UploadLitBurn(_featureGates.inputs.sunElevationDeg);
+    // The fire spread's plume shadow on the sun: zero while there is none.
+    UploadLitPlume();
     FlushLitConstants();
     BindLightingTextures();
 }

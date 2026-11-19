@@ -287,6 +287,12 @@ struct LightingTuning
     // times this (the night's exposure sits about 2.5 EV under the day's, and a
     // street lamp is far brighter than moonlight; by day 1).
     float camLocal = 2.5f;
+    // The fire spread's flames under the camera (PhotoCamera.hpp
+    // FlameExposureLog2, FlameFilm): their exposure at full night, in EV over
+    // a daylight exposure (0: as bright as by day), and the scene light after
+    // exposure where their channels clip (higher: later yellow and white).
+    float camFlameNight = 3.25f;
+    float camFlameKnee = 1.25f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

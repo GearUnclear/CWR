@@ -113,6 +113,8 @@ const char* CombatLightKindName(CombatLightKind kind)
             return "flare";
         case CombatLightKind::Motor:
             return "motor";
+        case CombatLightKind::Wildfire:
+            return "wildfire";
     }
     return "unknown";
 }
@@ -229,6 +231,16 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
             SetColour(s, 0.7f, 0.8f, 1.0f);
             SetPower(s, 3.0f * st, 0.3f, 30.0f);
             s.intensity *= 0.9f + 0.1f * Noise1(age * 17.0f, seed);
+            break;
+        }
+        case CombatLightKind::Wildfire:
+        {
+            // The flames' luminous intensity (cd), timed and flickered by
+            // its owner; the night's boost from the tuning (its shape, when
+            // the owner gives one, in SampleRecord).
+            const float cd = std::max(strength, 0.0f);
+            SetColour(s, kWildfireRgb[0], kWildfireRgb[1], kWildfireRgb[2]);
+            SetPower(s, cd * kWildfireRigPerLux * std::max(tuning.wildfire, 0.0f), kWildfireCore, kCombatFlareRange);
             break;
         }
     }
@@ -413,11 +425,11 @@ Detonation DetonationFromBlastSize(float blastSize)
     return DetonationFromAmmo(0.0f, kg * kChargeEnergyPerKg, 1.0f);
 }
 
-Detonation DeflagrationFromFuel(float fuelKg)
+Detonation DeflagrationFromFuel(float fuelKg, float maxKg)
 {
     Detonation d;
     d.deflagration = true;
-    d.chargeKg = Clamp(fuelKg, kMinFuelKg, kMaxFuelKg);
+    d.chargeKg = Clamp(fuelKg, kMinFuelKg, std::max(maxKg, kMinFuelKg));
     d.scale = std::cbrt(d.chargeKg);
     d.radius = 0.5f * kFuelDiameterPerS * d.scale;
     d.burnTime = kFuelDurationPerS * d.scale;
@@ -480,6 +492,34 @@ CombatLightSample EvaluateDetonationLight(const Detonation& d, float age, std::u
     return s;
 }
 
+float WildfireTwilightLux(float sunElevationDeg)
+{
+    // log10 lux at these elevations (degrees), log-linear between; above the
+    // horizon the sky only grows (the day's light is far past any fire's).
+    constexpr int kN = 7;
+    constexpr float kDeg[kN] = {-18.0f, -12.0f, -9.0f, -6.0f, -4.0f, -2.0f, 0.0f};
+    constexpr float kLog[kN] = {-3.15f, -2.1f, -0.85f, 0.53f, 1.25f, 1.95f, 2.6f};
+    const float e = sunElevationDeg;
+    if (e <= kDeg[0])
+        return std::pow(10.0f, kLog[0]);
+    if (e >= kDeg[kN - 1])
+        return std::pow(10.0f, kLog[kN - 1] + 0.35f * (e - kDeg[kN - 1]));
+    int i = 0;
+    while (i + 2 < kN && e > kDeg[i + 1])
+        ++i;
+    const float t = (e - kDeg[i]) / (kDeg[i + 1] - kDeg[i]);
+    return std::pow(10.0f, kLog[i] + (kLog[i + 1] - kLog[i]) * t);
+}
+
+float WildfireLightGain(float sunElevationDeg, bool photoCamera, float nightEffect, float cameraHeadroom)
+{
+    if (!photoCamera)
+        return 1.0f + (kWildfireNightBoost - 1.0f) * Clamp(nightEffect, 0.0f, 1.0f);
+    const float real = std::max(WildfireTwilightLux(sunElevationDeg), 1e-6f);
+    const float cap = kWildfireNightBoost / std::max(cameraHeadroom, 1.0f);
+    return Clamp(std::min(kWildfireSkyFloorLux / real, cap), 1.0f, kWildfireNightBoost);
+}
+
 float CombatTwilight(float sunElevationDeg)
 {
     const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
@@ -502,7 +542,7 @@ float CombatSmokeReach(float core, float albedo)
 
 float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo)
 {
-    if (kind != CombatLightKind::Fire && kind != CombatLightKind::Explosion)
+    if (kind != CombatLightKind::Fire && kind != CombatLightKind::Explosion && kind != CombatLightKind::Wildfire)
         return 1.0f;
     const float inside = std::max(d - s.core, 0.0f);
     return std::exp(-inside / CombatSmokeReach(s.core, albedo));
@@ -510,7 +550,8 @@ float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s,
 
 bool CombatLightIsSteady(CombatLightKind kind)
 {
-    return kind == CombatLightKind::Fire || kind == CombatLightKind::Flare || kind == CombatLightKind::Motor;
+    return kind == CombatLightKind::Fire || kind == CombatLightKind::Flare || kind == CombatLightKind::Motor ||
+           kind == CombatLightKind::Wildfire;
 }
 
 std::vector<int> KeepCombatLights(const CombatLightKind* kinds, int n, int cap)
@@ -730,6 +771,16 @@ void CombatLightSet::SetTint(std::uint32_t id, float r, float g, float b)
     }
 }
 
+void CombatLightSet::SetShape(std::uint32_t id, float core, float range, float spread)
+{
+    if (CombatLightRecord* rec = FindMutable(id))
+    {
+        rec->shapeCore = std::max(core, 0.0f);
+        rec->shapeRange = std::max(range, 0.0f);
+        rec->spread = std::max(spread, 0.0f);
+    }
+}
+
 void CombatLightSet::Remove(std::uint32_t id)
 {
     _records.erase(
@@ -744,7 +795,18 @@ CombatLightSample SampleRecord(const CombatLightRecord& r, const CombatTuning& t
 {
     if (r.detonation)
         return EvaluateDetonationLight(r.det, r.age, r.seed, tuning);
-    return EvaluateCombatLight(r.kind, r.strength, r.age, r.seed, tuning);
+    CombatLightSample s = EvaluateCombatLight(r.kind, r.strength, r.age, r.seed, tuning);
+    // A Wildfire light in its owner's shape: the same power (intensity at
+    // 1 m) on its core, ending at its window.
+    if (r.kind == CombatLightKind::Wildfire && r.shapeCore > 0.0f)
+    {
+        const float i1 = s.intensity * s.core * s.core;
+        s.core = r.shapeCore;
+        s.intensity = i1 / (s.core * s.core);
+        if (r.shapeRange > 0.0f)
+            s.range = std::max(r.shapeRange, s.core);
+    }
+    return s;
 }
 } // namespace
 
@@ -778,7 +840,9 @@ void CombatLightSet::Evaluate(const CombatTuning& tuning, float nightEffect)
             if (lum > 1e-4f)
                 SetColour(s, r.tint[0], r.tint[1], r.tint[2]);
         }
-        s.intensity *= CombatDayScale(r.kind, nightEffect);
+        // (A Wildfire light's day and night are its own: CombatTuning::wildfire.)
+        if (r.kind != CombatLightKind::Wildfire)
+            s.intensity *= CombatDayScale(r.kind, nightEffect);
         r.sample = s;
     }
 }
@@ -813,6 +877,12 @@ void CombatLightHandle::SetTint(float r, float g, float b)
 {
     if (_id != 0)
         GCombatLights().SetTint(_id, r, g, b);
+}
+
+void CombatLightHandle::SetShape(float core, float range, float spread)
+{
+    if (_id != 0)
+        GCombatLights().SetShape(_id, core, range, spread);
 }
 
 void CombatLightHandle::Release()

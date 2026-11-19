@@ -2292,3 +2292,31 @@ items:
       .githooks/game-data-allowlist.txt. No history rewrite.
     log:
       - "2026-10-26: planned with game-data-guard, which allowlists the classic-ui files only as a temporary exact-path group."
+
+  - id: fire-spread
+    title: "Spreading wildland fire (POSEIDON_XP_FIRESPREAD, own branch until its cost is verified)"
+    phase: phase-2
+    status: in-progress
+    priority: 3
+    depends_on: [remastered-lighting]
+    gh_issues: []
+    commits: []
+    summary: >
+      Grass, brush and tree fire that spreads by the US wildland fire model
+      (Rothermel surface spread over Anderson's 13 fuel models, elliptical
+      fronts from the wind, Byram flames, Van Wagner torching), hurting and
+      scaring soldiers and cutting AI sight with its smoke. Flames play a
+      fluid-simulated flipbook in four styles, lit as black bodies in a
+      linear HDR pass merged before the photo camera; the burn map chars
+      ground, trees, bushes and walls. Off by default. Branch fire-spread,
+      kept off graphics-remaster and main until the owner has seen its cost
+      in a big fight. Report: perf squad item FIRE-SPREAD. Open: per-island
+      fuel data, moisture from weather and clock, save and load,
+      multiplayer, the legacy air pass's haze on the flames.
+    log:
+      - "2026-11-07: prototype from the perf squad's FIRE-SPREAD explore lane on 1b007a91. Owner asked for its own branch until the cost is verified."
+      - "2026-11-08: flames reworked after owner review (round fireball sprite looked poor): fluid-sim flipbook, four styles, physical HDR pass, charring, firelight. Fire in view +0.4 to 0.6 ms frame and GPU at 1080p (2 and 4.5 km view); switch off matches the base build on ten stills views. Traps hit: gamma-space additive blending whitens overlapping flames (fixed by the linear target); RGTC uploads the driver silently refused left garbage mips (now encoded on the CPU); the shader's emissivity mapping must match the generator's kelvin mapping."
+      - "2026-11-11: v2's known limits fixed: smoke in front covers the flames (particle draws repeated into the flame target against the flames' depth), flames take the volumetric fog at their own depth, the TAA mask covers them, half-resolution flame target (33 to 25 MB at 1080p), crowns burn away per tree and burnt leaves cast no shadow. Trap hit: repeating every alpha-blended draw also caught objects fading in at the view's edge and cost 1.7 ms at 4.5 km; the cover now takes particles only."
+      - "2026-11-12: fire sound: crackle and roar emitters on the loudest burning blocks near the listener, snaps and pops near the camera; assets synthesized and processed through on-machine VST plugins in REAPER (gen_fire_sounds.py). Trap hit: Softube Saturation Knob opens an activation window and hangs a headless REAPER render."
+      - "2026-11-12: fire sound second pass on the owner's word (the first was poor): the raw fire is now played by Chromaphone 3 and Mini V4 from composed notes and automation in headless REAPER. Traps hit: Chromaphone repeats parameter names and cuts long labels (set by index and position), its bare mallet strike is a one-sample spike."
+      - "2026-11-17 to 2026-11-18: a showcase and realism audit led to ten fixes by ten Opus agents (exposure and colour, smoke over flames, per-plant char, a continuous Huygens front with roads, light halo, volume torches, base band and bed, residual flames, no felling, sparks), merged one at a time with determinism, flicker and char follow-ups; then burning wrecks, burning buildings and burnt shells (owner choices: hybrid shell, broken sloped wall tops), per-object smoke columns with a world-pass re-entry fix that took the burning village from 37.8 to 28.2 ms GPU, and a burn-map fix (no lattice on big burns, burnt ground never reverts). Pushed as branch fire-spread."

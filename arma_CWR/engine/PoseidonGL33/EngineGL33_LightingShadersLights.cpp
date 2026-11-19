@@ -465,11 +465,27 @@ vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
         float e = win / (1.0 + d2 / max(pos.w * pos.w, 1e-4));
         float invD = inversesqrt(max(d2, 1e-6));
         vec3 l = toLight * invD;
-        float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
-                           : combatBallCosine(dot(n, l), pos.w, d2 * invD);
+        float nl;
+        if (ext.z > 0.0) {
+            // The fire spread's lights (FrameLights.hpp spread; 0 for every
+            // other light): the flames are spread over a block, so a surface
+            // nearer than the spread in plan takes the light from as far off
+            // as the spread, at the flames' height, with a point's cosine
+            // (level ground near a block's centre is lit at the grazing angle
+            // of its flames, not from above, and no ball's horizon to trace).
+            vec3 tc = toLight;
+            float h2 = dot(tc.xz, tc.xz);
+            if (h2 < ext.z * ext.z) tc.xz = h2 > 1e-6 ? tc.xz * (ext.z * inversesqrt(h2)) : vec2(ext.z, 0.0);
+            vec3 lc = tc * inversesqrt(max(dot(tc, tc), 1e-6));
+            nl = foliage ? clamp((dot(nLight, lc) + 0.5) / 1.5, 0.0, 1.0) : max(dot(n, lc), 0.0);
+        } else {
+            nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
+                         : combatBallCosine(dot(n, l), pos.w, d2 * invD);
+        }
         // (Lamp shadows) The ground's bounce: the ball's light on the ground
-        // the surface faces, by the part of the ball above that ground.
-        if (litXpNight.y > 0.0 && xpBounceSetup(foliage ? nLight : n)) {
+        // the surface faces, by the part of the ball above that ground (none
+        // from the fire spread's lights: its halo and fill light the ground).
+        if (ext.z <= 0.0 && litXpNight.y > 0.0 && xpBounceSetup(foliage ? nLight : n)) {
             vec3 toG = pos.xyz - g_xpBounceFoot;
             float g2 = dot(toG, toG);
             if (g2 < r2) {

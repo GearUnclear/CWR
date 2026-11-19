@@ -133,6 +133,10 @@ out vec3 vWorldRel;
 out vec3 vNormalW;
 out vec4 vCrown;
 flat out float vLitMode;
+// The drawn object's origin, camera-relative (w 1; 0 where there is none: the
+// pre-transformed and shadow draws): the fire spread burns a tree's crown
+// away as one, by the burn at its foot.
+flat out vec4 vObjOrigin;
 
 void main() {
     float w = 1.0 / aRhw;
@@ -152,6 +156,7 @@ void main() {
     vNormalW = vec3(0.0, 1.0, 0.0);
     vCrown = vec4(0.0);
     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
+    vObjOrigin = vec4(0.0);
     // The sky's own clouds turn with the sky's drift (litSky.z, 0 unless a
     // clouds switch is on): the dome's texture turns about the zenith.
     bool dome = litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5;
@@ -224,6 +229,10 @@ out vec3 vWorldRel;
 out vec3 vNormalW;
 out vec4 vCrown;
 flat out float vLitMode;
+// The drawn object's origin, camera-relative (w 1; 0 where there is none: the
+// pre-transformed and shadow draws): the fire spread burns a tree's crown
+// away as one, by the burn at its foot.
+flat out vec4 vObjOrigin;
 
 void main() {
     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
@@ -239,6 +248,7 @@ void main() {
     vWorldRel        = worldPos.xyz; // camera-relative world position
     vNormalW         = worldNormal;
     vLitMode         = 1.0;
+    vObjOrigin       = vec4(worldArr[gl_InstanceID][3].xyz, 1.0);
     // Crown frame for foliage: the position inside an ellipsoid fitted to the
     // shape (w = 1 on its surface) and the ellipsoid's outward normal, which
     // lights a tree crown as one volume instead of as scattered leaf cards.
@@ -307,6 +317,10 @@ out vec3 vWorldRel;
 out vec3 vNormalW;
 out vec4 vCrown;
 flat out float vLitMode;
+// The drawn object's origin, camera-relative (w 1; 0 where there is none: the
+// pre-transformed and shadow draws): the fire spread burns a tree's crown
+// away as one, by the burn at its foot.
+flat out vec4 vObjOrigin;
 
 void main() {
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
@@ -322,6 +336,7 @@ void main() {
     vNormalW      = vec3(0.0, 1.0, 0.0);
     vCrown        = vec4(0.0);
     vLitMode      = 0.0;
+    vObjOrigin    = vec4(0.0);
 }
 )";
 
@@ -418,6 +433,11 @@ layout(std140) uniform LitConstants {
     vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
     vec4 litWater2;       // 91: shore water: x parts mask (1 shallow, 2 foam, 4 wet sand, 8 wave masking; 0 off), y time (s), z sea surface (m), w swash line (m)
     vec4 litXpNight;      // 92: lamp shadows: x 0, y light bounce gain, z lamps in the combat mask, w 0
+    vec4 litBurnRect;     // 93: scorched ground: xy burn map's south-west corner (m), z 1 / its extent, w 1 + the day (0 night .. 1 day) = bound (0 off)
+    vec4 litBurnGround;   // 94: its atlas: x burn rows' share of the height, y ground grid size (0 none), z 1 / width, w 1 / height
+    vec4 litBurnHeat;     // 95: firelight heat grids: x size (0 none; embers, then the halo, side by side), y first row's v, z fire clock (s), w the plant table's first row (0 none)
+    vec4 litPlumeInfo;    // 96: the fire's plume shadow: x blobs (0 none), y gain on their optical depth
+    vec4 litPlume[16];    // 97-112: per blob: xy middle (world xz), z height, w optical depth; x sigma along, y across, zw wind dir
 };
 )";
 
@@ -457,6 +477,7 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 in vec3 vWorldRel;
+flat in vec4 vObjOrigin;
 in vec3 vNormalW;
 in vec4 vCrown;
 flat in float vLitMode;
@@ -838,6 +859,28 @@ float cloudSunVisibility(vec3 posAbs) {
     return mix(1.0, litCloud.y, covered);
 }
 
+// The fire spread's plume shadow (FireSpreadWorld.hpp GetPlumeShadow): the sun
+// ray from the point climbs to each blob's height and meets its soft Gaussian
+// footprint there; the optical depths add and the direct sun keeps
+// exp(-tau / sin(sun)) (consult eighth 1: about 60% less near the source, 40%
+// at 1 km, 25% at 2 km). 1 while there is no plume (litPlumeInfo.x 0).
+float plumeSunVisibility(vec3 posAbs) {
+    if (litPlumeInfo.x < 0.5) return 1.0;
+    float up = max(litSunDir.y, 0.15);
+    float tau = 0.0;
+    int n = int(litPlumeInfo.x + 0.5);
+    for (int i = 0; i < 8; ++i) {
+        if (i >= n) break;
+        vec4 a = litPlume[2 * i];
+        vec4 b = litPlume[2 * i + 1];
+        vec2 d = posAbs.xz + litSunDir.xz / up * max(a.z - posAbs.y, 0.0) - a.xy;
+        float u = dot(d, b.zw) / b.x;
+        float v = (d.y * b.z - d.x * b.w) / b.y;
+        tau += a.w * exp(-0.5 * (u * u + v * v));
+    }
+    return exp(-tau * litPlumeInfo.y / up);
+}
+
 // Long tree shadows beyond the shadow maps (canopyShadows; Canopy.hpp): the
 // sun-visibility map traced through the canopy of every tree, bush, forest and
 // building, read once. A texel holds r the ground's visibility, g the lowest
@@ -978,7 +1021,8 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     if (keyLit) {
         float shadowVis = 1.0;
         if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
-        sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+        sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs) *
+                        plumeSunVisibility(posAbs);
         // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
         sunVisibility *= canopySunVisibility(posAbs);
     } else {
@@ -1045,6 +1089,9 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // for vehicles, glass and gear: the terrain's segments differ in specular
     // material, and a low flash's glint drew their borders on the ground.
     vec3 combat = kd * combatLights(n, nLight, foliage, v);
+    // The fire spread's light on the ground round its flames and what stands
+    // there (burnFireLight): irradiance on the rig's scale, as combat light.
+    if (litBurnRect.w > 0.5) combat += kd * g_fireLight;
     vec3 combatGloss = terrain ? vec3(0.0) : litMatSpecular.rgb * g_combatSpec * litHorizon.w;
 
     vec3 a = toLinear(albedo);
@@ -1077,6 +1124,13 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         vec3 diffuseLight = a * (sp.diffuse * (direct + ambient + moon + local + combat) + emissive) * wetKeep;
         vec3 specSun = sp.sun * sunOn;
         vec3 specSky = sp.sky * sunOn;
+        // Charred ground and objects (the fire spread, burnGround,
+        // burnObject) are matt; never taken while litBurnRect.w is 0, and
+        // g_burnSpec is 1 off the burn.
+        if (litBurnRect.w > 0.5 && g_burnSpec < 1.0) {
+            specSun *= g_burnSpec;
+            specSky *= g_burnSpec;
+        }
         radiance = (diffuseLight + specSun + specSky + g_physicalSpec * litGround.w + combatGloss + wetLit) * exposure +
                    wetEnv;
         float sum = max(dot(radiance, kLuma), 1e-5);
@@ -1111,6 +1165,15 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
             if (litSurface2.y < 2.5) return vec3(canopyVis);
             return toDisplay(tonemapNeutral((specSun + specSky) * exposure));
         }
+    } else if (litBurnRect.w > 0.5 && g_burnSpec < 1.0) {
+        // Charred and sooted objects (the fire spread, burnObject) are matt;
+        // never taken while litBurnRect.w is 0, so the expression below is
+        // the one of before, untouched.
+        radiance = (a * (direct + ambient + moon + local + emissive + combat) * wetKeep +
+                         glossy(n, v, sunVisibility) * (sunOn * g_burnSpec) + g_physicalSpec * litGround.w +
+                         combatGloss + wetLit) *
+                            exposure +
+                        wetEnv;
     } else {
         radiance = (a * (direct + ambient + moon + local + emissive + combat) * wetKeep +
                          glossy(n, v, sunVisibility) * sunOn + g_physicalSpec * litGround.w + combatGloss + wetLit) *
@@ -1120,6 +1183,15 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
     g_combatShare = clamp(dot((a * combat + combatGloss) * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+    // The fire spread's embers (burnEmbers): the ash's own glow, scene light
+    // exposed with the frame (its light, burnFireLight, is in the combat
+    // light above). It keeps its colour under the night eye, as combat light
+    // does. Never taken while litBurnRect.w is 0.
+    if (litBurnRect.w > 0.5 && any(greaterThan(g_fireEmit, vec3(0.0)))) {
+        vec3 fire = g_fireEmit * exposure;
+        radiance += fire;
+        g_combatShare = max(g_combatShare, clamp(dot(fire, kLuma) / max(dot(radiance, kLuma), 1e-5), 0.0, 1.0));
+    }
     if (foliage) ambientShare *= 0.5;
 
     if (litFlags.z > 0.5 && litFlags.z < 4.5) {
@@ -1283,6 +1355,8 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
 )";
 
 static const char s_psNormalRemasterMain[] = R"(
+uniform sampler2D burnMap; // unit 17: the fire spread's scorched ground (burnObject; read only while litBurnRect.w is 1)
+
 void main() {
     vec4 t0 = decalLayerMode > 0.5 ? texture(decalLayers, vec3(vUV0, vUV1.x)) : texture(tex0, vUV0);
     vec4 r0;
@@ -1299,6 +1373,81 @@ void main() {
         r0 = vec4(rgb, classic.a);
     } else if (vLitMode > 0.5) {
         vec3 albedo = t0.rgb * constColor.rgb;
+        // Charred objects (the fire spread): the draw's char class rides in
+        // surfClass.w (0 never: men, vehicles, weapons, ground decals; 1 a
+        // house, wall or rock; 2 a tree, bush or forest block), leaves are
+        // the draws with a forced diffuse. Leaves scorch brown and burn away
+        // over burnt-out ground (a bare trunk stays), trunks and branches
+        // char, walls and rocks soot from the ground up. litBurnRect.w is 0
+        // while the fire is off or nothing has burnt, and then nothing here
+        // runs (a uniform branch). (followups) A burning wreck (3 and up) is
+        // the next block's.
+        if (litBurnRect.w > 0.5 && surfClass.w > 0.5 && surfClass.w < 2.5) {
+            vec3 burnPos = vWorldRel + litCamPos.xyz;
+            bool leaves = dot(litMatForced.rgb, kLuma) > 1e-4;
+            vec3 nb = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+            // A tree, a bush, a reed clump or an olive the fire came near
+            // has its own fire (the plant table, burnPlantAt): its leaves and
+            // bark follow it alone. The rest (a forest block, an object the
+            // fire never reached) read the burn map.
+            // The fragment's footprint (m), taken here where every fragment
+            // of the draw is still running.
+            float pixM = length(fwidth(vWorldRel));
+            ivec2 plant = surfClass.w > 1.5 && vObjOrigin.w > 0.5
+                              ? burnPlantAt(burnMap, vObjOrigin.xz + litCamPos.xz)
+                              : ivec2(-1);
+            if (plant.x >= 0) {
+                vec3 origin = vObjOrigin.xyz + litCamPos.xyz;
+                if (leaves) {
+                    if (!plantLeaves(burnMap, plant, burnPos, origin, pixM, albedo)) discard;
+                } else {
+                    albedo = plantBark(burnMap, plant, albedo, burnPos, origin);
+                }
+            } else if (leaves) {
+                // A tree's or a bush's crown goes as one, by the burn at its
+                // foot as its trunk reads it (burnObjectAt), never split
+                // along a texel edge of the map; the burn under each leaf
+                // still scorches it. Other objects' leaves, and draws
+                // without an origin, read the burn under the fragment.
+                float bFrag = burnTexel(burnMap, (burnPos.xz - litBurnRect.xy) * litBurnRect.z);
+                float bGone = surfClass.w > 1.5 && vObjOrigin.w > 0.5
+                                  ? burnObjectAt(burnMap, vObjOrigin.xz + litCamPos.xz)
+                                  : bFrag;
+                float burn = max(bGone, bFrag);
+                if (burn > 0.0) {
+                    if (burnLeafGone(bGone, burnPos)) discard;
+                    albedo = burnLeaves(albedo, burn, burnPos);
+                }
+            } else {
+                float burn = burnObjectAt(burnMap, burnPos.xz);
+                if (burn > 0.0) albedo = burnObject(burnMap, albedo, burn, burnPos, nb, surfClass.w > 1.5);
+                // (buildings builder) a building the fire set alight has its
+                // own look (burnBuilding): its soot climbing with its fire,
+                // its burnt shell, what is left of a shed
+                ivec2 bld = surfClass.w < 1.5 && vObjOrigin.w > 0.5
+                                ? burnBuildingAt(burnMap, vObjOrigin.xz + litCamPos.xz)
+                                : ivec2(-1);
+                if (bld.x >= 0 && !burnBuilding(burnMap, bld, albedo, burnPos, nb)) discard;
+            }
+            // The flames' light on the object, fading out above
+            // kFireLightHeight (leaves take it as a face turned sideways).
+            float above = burnPos.y - burnGroundY(burnMap, burnPos.xz, burnPos.y);
+            float lift = 1.0 - smoothstep(0.3 * kFireLightHeight, kFireLightHeight, above);
+            if (lift > 0.0) burnFireLight(burnMap, burnPos.xz, leaves ? 0.0 : nb.y, lift);
+        }
+        // (followups) A wreck the fire burns (surfClass.w 3 and up, its char
+        // and its shell's glow packed after it): its paint, glass, canvas and
+        // tyres burn as its fire goes, its hot shell glows by night
+        // (burnWreck). It takes no ground halo (burnFireLight): the halo at
+        // its own flames' foot lit the whole body flat orange; the fire's
+        // point lights light it, as before.
+        if (litBurnRect.w > 0.5 && surfClass.w > 2.5) {
+            vec3 burnPos = vWorldRel + litCamPos.xyz;
+            vec3 nb = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+            float originY = vObjOrigin.w > 0.5 ? vObjOrigin.y + litCamPos.y : burnPos.y;
+            bool leaves = dot(litMatForced.rgb, kLuma) > 1e-4;
+            if (!burnWreck(burnMap, surfClass.w, surfClass.x, albedo, burnPos, nb, originY, leaves)) discard;
+        }
         // Relief and cavities (the surfaces switch): the texture's luminance as
         // a height, by the draw's surface class, fading out by 60 m; leaves,
         // glass and rubber take none.
@@ -1361,6 +1510,8 @@ void main() {
 // is zero for the sea: then this is the stock terrain main. Nothing is
 // evaluated beyond kTdMaxDistance (the frame gate's "terrain within 300 m").
 static const char s_psDetailRemasterMain[] = R"(
+uniform sampler2D burnMap; // unit 17: the fire spread's scorched ground (burnAt; read only while litBurnRect.w is 1)
+
 // Terrain detail constants (Graphics/Remaster/TerrainDetail.hpp holds the same).
 const float kTdZoom = 6.0;
 const float kTdCellTexels = 2.0;
@@ -1512,6 +1663,20 @@ void main() {
                 g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
             }
         }
+        // Scorched ground (the fire spread): the land burnt by a grass fire
+        // turns to ash. litBurnRect.w is 0 while the fire is off or nothing
+        // has burnt, and then nothing here runs (a uniform branch).
+        if (litBurnRect.w > 0.5 && litDetail.w > 0.5) {
+            vec2 burnXZ = vWorldRel.xz + litCamPos.xz;
+            float burn = burnAt(burnMap, burnXZ);
+            if (burn > 0.0) {
+                albedo = burnGround(albedo, burn, burnXZ);
+                // Embers in the ash of a cell still flaming.
+                burnEmbers(burnMap, burnXZ);
+            }
+            // The flames' light on the land round them.
+            burnFireLight(burnMap, burnXZ, vNormalW.y * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12)), 1.0);
+        }
         // Shore water's wet sand (litWater2): the land darkens below
         // the swash line, with a ragged edge.
         if (litWater2.x > 0.5 && litDetail.w > 0.5 && (int(litWater2.x + 0.5) & 4) != 0) {
@@ -1533,6 +1698,8 @@ void main() {
 )";
 
 static const char s_psGrassRemasterMain[] = R"(
+uniform sampler2D burnMap; // unit 17: the fire spread's scorched ground (burnAt; read only while litBurnRect.w is 1)
+
 void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
@@ -1542,7 +1709,20 @@ void main() {
     r0.a = clamp((psC5.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
     if (vLitMode > 0.5 && vLitMode < 1.5) {
         g_wetDraw = 2; // grass clutter: wet blades, no puddles
-        r0.rgb = shadeRemastered(clamp(t0.rgb * t1.rgb * 2.0, 0.0, 1.0), true, ambientShare);
+        vec3 albedo = clamp(t0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+        // Scorched ground (the fire spread): burnt grass is gone, singed
+        // grass at the fire's edge darkens. litBurnRect.w is 0 while the fire
+        // is off or nothing has burnt, and then nothing here runs.
+        if (litBurnRect.w > 0.5) {
+            vec2 burnXZ = vWorldRel.xz + litCamPos.xz;
+            float burn = burnAt(burnMap, burnXZ);
+            if (burn > kBurnGrassGone) discard;
+            if (burn > 0.0) albedo = burnGrass(albedo, burn);
+            // The flames' light on the blades round them (they shade as the
+            // land does, up-facing).
+            burnFireLight(burnMap, burnXZ, 1.0, 1.0);
+        }
+        r0.rgb = shadeRemastered(albedo, true, ambientShare);
     } else {
         r0.rgb = clamp(vColor.rgb * t0.rgb * t1.rgb * 2.0, 0.0, 1.0);
     }
@@ -1645,7 +1825,7 @@ vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
     float skyVisibility;
     // The sea casts nothing into the map and is no leaf: no offset, no lift.
     sunVis = shadowMapVisibility(n, nl, 0.0, 0.0) * terrainSunVisibility(posAbs, skyVisibility) *
-             cloudSunVisibility(posAbs);
+             cloudSunVisibility(posAbs) * plumeSunVisibility(posAbs);
     g_sunVisibility = sunVis;
     vec3 kd = litMatDiffuse.rgb;
     vec3 ka = litMatAmbient.rgb;

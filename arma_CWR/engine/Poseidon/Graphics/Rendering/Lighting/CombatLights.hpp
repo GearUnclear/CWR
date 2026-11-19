@@ -40,8 +40,9 @@ enum class CombatLightKind : std::uint8_t
     Tracer,    // a tracer round in flight
     Flare,     // an illuminating flare under its parachute, tinted by its ammo
     Motor,     // a missile's motor while it thrusts, tinted
+    Wildfire,  // the fire spread's flames (FireSpreadWorld.cpp): shaped and timed by their owner
 };
-constexpr int kCombatLightKinds = 7;
+constexpr int kCombatLightKinds = 8;
 
 const char* CombatLightKindName(CombatLightKind kind);
 // A burst is fired and forgotten: it lives until its envelope has finished.
@@ -82,7 +83,57 @@ struct CombatTuning
     // twilight (CombatTwilight): 1, and under the photoreal camera less while
     // the sky still lights the ground. Their flames and smoke keep it all.
     float twilight = 1.0f;
+    // The fire spread's light (kind Wildfire) per candela of its flames, as
+    // a share of the physical scale (WildfireLightGain): 1 by day, more at
+    // night.
+    float wildfire = 1.0f;
 };
+
+// ---- The fire spread's light (kind Wildfire) ----
+// Its owner (FireSpreadWorld.cpp) gives each light the luminous intensity of
+// the flames it stands for, in candela, already timed (its rise and fall)
+// and flickered, and its shape (CombatLightSet::SetShape): the falloff's
+// core, a horizontal spread for the surface's cosine, and its window's end. Under the photoreal camera a candela lights
+// a surface 1 m off with kWildfireRigPerLux of the rig's irradiance: the rig's scale, a white surface under the
+// reference sun and sky (about 100 klx) shows 1 / 1.6 (LightRig.hpp kPhysicalReferenceSunDeg), so a lux is 1 / 160000
+// of it. By day and to sunset that is the whole law: the fire's light stands to the sky's as it does in nature (1100
+// lux on a wall 10 m from a grass head is 1% of the noon sun, and shows by dusk at the consult's times). The game's
+// night is a floor (kWildfireSkyFloorLux: the night fill at the photoreal
+// rig's scale, LightRig.cpp kSkyNight x kPhysicalNightFill), not the
+// 0.002 lux of a real moonless night, so once the real sky
+// (WildfireTwilightLux) falls under that floor the light is raised by the
+// floor over the real sky (the fire stands to the game's night as it does
+// to the real one), at most kWildfireNightBoost (from about 8 degrees under
+// the horizon): under the photoreal camera's night exposure (at most -1 EV)
+// that puts level grass 10 m from a grass head at mid grey and leaves the
+// ground beside the flames unclipped, a wall a kilometre off at about the
+// night's fill, and the night's unlit ground black (1300, the camp fire's
+// own scale, blew the lit ground out past the flames).
+constexpr float kWildfireRigPerLux = 1.0f / 160000.0f;
+constexpr float kWildfireSkyFloorLux = 86.0f;
+constexpr float kWildfireNightBoost = 300.0f;
+// The real clear sky's light on level ground without a moon (lux) by the
+// sun's elevation (degrees): 400 at sunset, 3.4 at the end of civil twilight,
+// 0.008 at nautical, 0.0007 at astronomical (log-linear between).
+float WildfireTwilightLux(float sunElevationDeg);
+// CombatTuning::wildfire: under the photoreal camera the night's boost by
+// the sun (above), at most kWildfireNightBoost over `cameraHeadroom` (how
+// many times brighter the camera may expose this frame than a night's: its
+// exposure cap, PhotoCamera.hpp kExposureMaxLog2 toward
+// kExposureNightMaxLog2 by its night). A real eye or camera opens some 200
+// times between nautical twilight and the night; the photoreal camera only
+// about 9, so held by the sky alone a fire at 20:15 lit the land a few
+// times brighter on screen than the same fire at night, a sunset orange to
+// the horizon. With the cap, the fire's light is never brighter on screen at
+// dusk than at night, and still out-lights the sky at the consult's times
+// (100 m 10 to 15 min after sunset, 1 km from the end of civil twilight).
+// Without the photoreal camera the classic night effect's share of the boost.
+float WildfireLightGain(float sunElevationDeg, bool photoCamera, float nightEffect, float cameraHeadroom = 1.0f);
+// The colour of the flames' light (linear, luminance 1): soot at about
+// 1450 K, deep orange with almost no blue (the consult: redder than a candle).
+constexpr float kWildfireRgb[3] = {1.0f, 0.16f, 0.012f};
+// The shape a Wildfire light gets when its owner gives none (m).
+constexpr float kWildfireCore = 16.0f;
 
 // A steady light (a fire, a flare, a motor) against the twilight under the
 // photoreal camera: the share of its night power that
@@ -316,8 +367,10 @@ struct Detonation
 Detonation DetonationFromAmmo(float hit, float indirectHit, float indirectHitRange);
 // From the classic blast size alone (0.25 .. 1): s = 2.5^(1/3) x size / 0.6.
 Detonation DetonationFromBlastSize(float blastSize);
-// A fuel fireball from the kg of fuel that burns in it.
-Detonation DeflagrationFromFuel(float fuelKg);
+// A fuel fireball from the kg of fuel that burns in it (at most maxKg: the
+// stock's kMaxFuelKg; a fuel tanker's more with the fire lane on,
+// FireSpreadWorld.hpp WreckFireballMaxKg).
+Detonation DeflagrationFromFuel(float fuelKg, float maxKg = kMaxFuelKg);
 // The gas temperature (K) `age` seconds after the detonation: the flash's
 // peakK falling with flashTime onto the afterburn's burnK, held burnTime, then
 // falling to soot (kSootK) with kGlowFallTime. A deflagration rises to its
@@ -446,6 +499,12 @@ struct CombatLightRecord
     bool detonation = false;            // a blast with its own physics (det)
     Detonation det;
     CombatLightSample sample; // this frame's (Evaluate)
+    // A Wildfire light's shape from its owner (SetShape; 0: the kind's own):
+    // its falloff's core (m) and window end (m), and the surface cosine's
+    // horizontal spread (m: a surface nearer than this in plan takes the
+    // light from as far off as this; the flames are spread over a block, not
+    // at its centre).
+    float shapeCore = 0.0f, shapeRange = 0.0f, spread = 0.0f;
 };
 
 // The most one Tick ages the set by. A longer step (time acceleration at a low
@@ -464,6 +523,8 @@ class CombatLightSet
     std::uint32_t Create(CombatLightKind kind, const float pos[3], float strength);
     bool Update(std::uint32_t id, const float pos[3], float strength);
     void SetTint(std::uint32_t id, float r, float g, float b);
+    // A Wildfire light's shape (CombatLightRecord::shapeCore and the rest).
+    void SetShape(std::uint32_t id, float core, float range, float spread);
     void Remove(std::uint32_t id);
     // Ages every light by a simulation step, at most kCombatMaxTickStep, and
     // drops the finished bursts. A step of 0 (paused) ages nothing.
@@ -524,6 +585,7 @@ class CombatLightHandle
     std::uint32_t Id() const { return _id; }
     void Set(CombatLightKind kind, const float pos[3], float strength);
     void SetTint(float r, float g, float b);
+    void SetShape(float core, float range, float spread);
     void Release();
 
   private:

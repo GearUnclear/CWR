@@ -64,6 +64,54 @@ inline void ShadowKeepAlpha()
     glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 }
 
+// Premultiplied alpha with the destination alpha kept: the source colour is
+// added as it is and covers (1 - src.a) of what is behind it, so one draw both
+// adds light (an emissive flame's core) and darkens (its soot). The fire
+// spread's flame sheets (EngineGL33_FireFlames.cpp).
+inline void PremultipliedKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
+// Light added over what stays: dst.rgb = src.rgb + dst.rgb * src.a, and the
+// alpha the product of every draw's src.a (the transmittance of all of them,
+// from a target cleared to alpha 1). The fire spread's linear flame target
+// (EngineGL33_FireFlames.cpp).
+inline void TransmittanceAccumulate()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_SRC_ALPHA);
+}
+
+// The same colour factors with the destination alpha kept: that target laid
+// over the frame as it is when the post pass cannot merge it.
+inline void TransmittanceKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
+// What is there dimmed by the source's alpha, nothing added, the alpha kept:
+// dst.rgb *= 1 - src.a. Smoke drawn again into the fire spread's flame target
+// dims the flames behind it (EngineGL33::BeginFireFlameCover).
+inline void DimBySourceKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
+// Smoke over the flames (fix 02): the source laid over what is there as the
+// frame blends it (rgb: src.rgb src.a + dst.rgb (1 - src.a)), and the alpha
+// the share of what lies behind that the layers leave (dst.a *= 1 - src.a).
+// Smoke drawn again into the fire spread's flame cover target, in front of
+// the flames (EngineGL33::BeginFireFlameCover).
+inline void SmokeOverKeepTransmittance()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 } // namespace render::blend
 
 } // namespace Poseidon

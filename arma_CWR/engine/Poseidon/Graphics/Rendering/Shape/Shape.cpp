@@ -1848,6 +1848,17 @@ void Shape::InitPlanes()
     RecalculateNormals(true);
 }
 
+void Shape::RefreshPlanes()
+{
+    if (_plane.Size() <= 0)
+    {
+        return;
+    }
+    _plane.Realloc(_face.Size());
+    _plane.Resize(_face.Size());
+    RecalculateNormals(true);
+}
+
 void Shape::InvalidateNormals()
 {
     _faceNormalsValid = false;

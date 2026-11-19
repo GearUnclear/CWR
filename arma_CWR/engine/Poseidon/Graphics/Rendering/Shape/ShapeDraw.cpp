@@ -25,6 +25,7 @@
 #include <Poseidon/Core/Data3D.h>
 
 #include <Poseidon/World/MapTypes.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <stdio.h>
 #include <cmath>
 #include <memory>
@@ -162,6 +163,16 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 KindScope(const KindScope&) = delete;
                 KindScope& operator=(const KindScope&) = delete;
             } kindScope(engine, matSource ? matSource->GetDrawObjectKind() : render::DrawObjectKind::Unknown);
+            // The fire spread's char tells trees, bushes and forest blocks
+            // from houses (FireSpreadWorld.hpp); a no-op while it is off.
+            struct VegetationScope
+            {
+                bool previous;
+                explicit VegetationScope(IAnimator* source) : previous(firespread::BeginVegetationDraw(source)) {}
+                ~VegetationScope() { firespread::EndVegetationDraw(previous); }
+                VegetationScope(const VegetationScope&) = delete;
+                VegetationScope& operator=(const VegetationScope&) = delete;
+            } vegetationScope(matSource);
             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
             if (spec & (OnSurface | IsOnSurface))
             {

@@ -520,6 +520,11 @@ class EngineGL33 : public Engine
     // UploadFrameConstants re-uploads (e.g. from EnableSunLight) preserve
     // whichever fog state the active pass last asked for.
     FrameState _frameState;
+    // (smoketrim) The world pass's frame state at its last full set-up
+    // (BeginPass) and the frame it was in: the world's 3D pass entered again
+    // from its own screen-space draws in the same frame keeps that set-up.
+    FrameState _passInitState;
+    std::uint32_t _passInitFrame = 0xffffffffu;
     std::vector<DrawItem> _drawItems;
     DrawItem _currentDrawItem;
 
@@ -833,7 +838,7 @@ class EngineGL33 : public Engine
     // GPU has finished it (the CPU never waits on a query).
     static constexpr int kGpuFrames = 4;
     unsigned int _gpuQueries[kGpuFrames][Poseidon::gpu::kMarkCount] = {};
-    std::uint32_t _gpuRecorded[kGpuFrames] = {};
+    std::uint64_t _gpuRecorded[kGpuFrames] = {};
     int _gpuSlot = 0;
     bool _gpuTiming = false;
     Poseidon::gpu::GpuTimings _gpuTimings;
@@ -1154,6 +1159,57 @@ class EngineGL33 : public Engine
     void ResetSurfaceClassPrograms();   // the lit programs were deleted (their uniform cache goes)
     unsigned int _surfBoundProgram = 0; // the bound program when it writes fragSurf, else 0
     void SurfaceEnterInterior();        // a depth clear inside the world pass: a vehicle interior draws next
+    // The fire spread (POSEIDON_XP_FIRESPREAD): the scorched ground's atlas is
+    // bound this frame (UploadLitFrameConstants), so ApplySurfaceClass hands
+    // every object draw its char class (surfClass.w) and leaves draws too;
+    // false while the fire is off or nothing has burnt.
+    bool _burnDraws = false;
+    // The flame sheets (EngineGL33_FireFlames.cpp): one instanced draw of the
+    // fire's FlameSheets at the start of the translucent objects
+    // (BeginTranslucentObjects); nothing is made, bound or drawn while
+    // firespread::GetFlames has none. DeinitFireFlames frees what it made.
+    void DrawFireFlames();
+    void DeinitFireFlames();
+    // The flames' own exposure over the camera's this frame, log2
+    // (PhotoCamera.hpp FlameExposureLog2: 0 by day and without the photoreal
+    // camera, more at dusk and at night); the flame shaders' flameExpose.x.
+    // Anything drawn into the flames' linear target as flame light takes it.
+    float FireFlameExposureLog2() const;
+    // The fire spread's sparks (EngineGL33_FireSparks.cpp): one instanced
+    // draw of firespread::GetSparks' streaked points, called from
+    // DrawFireFlames right after the tongues into the same target with the
+    // same blend and depth state (hdr: the linear flame target, soft: the
+    // world's depth copy bound on kFlameDepthUnit, targetScale: the copy's
+    // texels per target pixel across); DeinitFireSparks frees what it made.
+    void DrawFireSparks(bool hdr, bool soft, const GfxMatrix& proj, int targetScale);
+    void DeinitFireSparks();
+    // The smoke in front of the flames (EngineGL33_FireFlames.cpp): in a frame
+    // whose flames went into their linear target (_flameCoverFrame), every
+    // alpha-blended particle draw (no drawing object: smoke, dust, rain) with
+    // a depth test after them in the world is drawn again into that target,
+    // against the flames' depth, its alpha dimming the flames behind it
+    // (FlushQueue, EmitDraw). Objects fading in at the view's edge draw
+    // alpha-blended too, by the thousand at 4.5 km: they are left out (they
+    // cost 1.7 ms there). False, and nothing changed, when it does not
+    // apply; End puts the frame's state back.
+    std::uint32_t _flameCoverFrame = 0xffffffffu;
+    bool FlameCoverWanted() const
+    {
+        return _flameCoverFrame == GetFrameCounter() && _currentBlendMode == BlendMode::AlphaBlend &&
+               _currentDepthMode != DepthMode::Disabled &&
+               GetDrawObjectKind() == Poseidon::render::DrawObjectKind::Unknown;
+    }
+    // Smoke over the flames (fix 02): the alpha queue holds particles and
+    // decals only (smoke puffs), so its flush is taken whatever object is
+    // drawing then (a flush often comes with the next object's first draw,
+    // whose kind is already set).
+    bool FlameCoverWantedQueue() const
+    {
+        return _flameCoverFrame == GetFrameCounter() && _currentBlendMode == BlendMode::AlphaBlend &&
+               _currentDepthMode != DepthMode::Disabled;
+    }
+    bool BeginFireFlameCover();
+    void EndFireFlameCover();
     // The sky light (EngineGL33_SkyTable.cpp): starts a projection when the
     // sky table was rebuilt or the haze changed, collects a finished one.
     void PollSkyLightSH();
@@ -1256,6 +1312,9 @@ class EngineGL33 : public Engine
     // material samplers of `bias`: the twin set when non-zero, else the plain set.
     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
     void BeginTranslucentObjects() override;
+    // The TAA's copy of the opaque world for its particle mask (the first
+    // half of BeginTranslucentObjects).
+    void CopyOpaqueForTaa();
     // The photoreal camera (feature switch photoLight;
     // EngineGL33_Camera.cpp, Graphics/Remaster/PhotoCamera.hpp): the physical
     // rig's inputs, the metered and adapted exposure, the white balance, and
@@ -1386,7 +1445,17 @@ class EngineGL33 : public Engine
         // (camEncode) and the composite is the camera; its exposure (linear).
         bool camera = false;
         float exposure = 1.0f;
+        // The frame with the fire spread's flames merged in (MergeFireFlames),
+        // which every stage after the Air stage reads (PostSceneTex); 0 without.
+        unsigned int flameScene = 0;
     };
+    // The fire spread's flames in the post pass (EngineGL33_FireFlames.cpp):
+    // their linear target merged onto the decoded frame before the first stage
+    // after the Air stage (a no-op unless this frame drew into it), and, when no
+    // such stage ran, laid over the frame target instead (BlendFireFlamesIntoFrame).
+    void MergeFireFlames(PostFrame& f);
+    bool FireFlamesPending() const;
+    void BlendFireFlamesIntoFrame(bool camera);
     void PostFrameGeometry(PostFrame& f) const;
     // The frame as the fog's stages see it: in a vehicle interior, the
     // projection the world was drawn with (the interior draws with its own
@@ -1661,7 +1730,7 @@ class EngineGL33 : public Engine
     // arrays); called from BeginPass.  No-op unless a depth pass ran this frame.
     void UpdateShadowMapLitState();
 
-    ShadowMapTuning _shadowTuning;                 // runtime knobs (FP parameter set)
+    ShadowMapTuning _shadowTuning; // runtime knobs (FP parameter set)
     // The shadow tier _shadowTuning carries (Graphics/Shadow/ShadowXp.hpp; -1
     // before the first SetLookOptions) and the tuning as built, which the
     // tier's fields go back to when it changes.

@@ -468,4 +468,57 @@ constexpr float kSunDiscWhite = 0.85f;
 constexpr float kCameraBloomThreshold = 3.0f;
 constexpr float kCameraBloomKnee = 1.0f;
 
+// ---- The fire spread's flames (EngineGL33_FireFlames.cpp) -------------------
+// The flames are light of physical luminance (black bodies at their soot's
+// temperature, EngineGL33_FireFlameShaders.cpp flameBlackBody). A real camera
+// does two things to them that the camera above does not.
+//
+// Exposure. The rig's night is far brighter, against its day, than a real one
+// (the moonlit ground at a fiftieth of the day, where the real moon gives a
+// millionth), and the camera's night exposure is held under
+// kExposureNightMaxLog2, so a flame at its true luminance read dimmer at night
+// than by day. A camera that films a fire at night has opened up for the dark
+// and the fire burns past white. So the flames take their own exposure
+// (FlameExposureLog2): the camera's by day, moving as the light fails
+// (FlameDark) toward a daylight exposure (kMiddleGrey over kDaylightMeanLog2,
+// with camEv) plus camFlameNight EV, never under the camera's own. The
+// camera's meter does not read them (EngineGL33_Camera.cpp PostCameraMeter):
+// their own light would pull the highlight guard and hold every flame under
+// white.
+//
+// Clipping. The hue-keeping curve holds a saturated orange at its hue however
+// bright it is: a flame's green stays under about half its red, so on screen
+// it could never be brighter than sunlit grass. A camera's channels clip one
+// by one: from kFlameKneeSoft of camFlameKnee (scene light after exposure:
+// about 2.8 stops over middle grey, where the curve shows seven tenths of
+// white and a video camera's red clips) each channel rolls off toward its
+// clip on its own, so the red is held while the green climbs (yellow), and
+// the clipped channels' excess spills kFlameSpill of itself into every
+// channel (the sensor's crosstalk), so a core goes white some four stops past
+// the knee (the wildfire consult 6a: yellow at about 1, white at about 4
+// times the exposure's white). FlameFilm gives the channel ratios that makes,
+// with the peak channel's light kept, so the composite's curve shows them.
+// Below half the knee nothing changes: by day the flame bodies keep their
+// orange-red and only the thickest cores (a deep head, a torching crown)
+// reach orange-yellow, brighter than the sunlit ground.
+// FlameDark: 0 by day, 1 at full night, kFlameDarkDusk of the camera's dusk
+// (CameraDusk) and the rest of its night (CameraNight): it rises from 4
+// degrees of sun, is kFlameDarkDusk of the way at 4 degrees under the horizon
+// and all of it at 12 under, as the light's logarithm falls (a civil
+// twilight is about a thousandth of the day, a moonlit night a millionth), so
+// a fire in the late dusk is a little less bright than at night.
+constexpr float kFlameDarkDusk = 0.6f;
+float FlameDark(float dusk, float night);
+// The flames' exposure (log2) for the camera's (`cameraLog2`), at `dark`.
+float FlameExposureLog2(float cameraLog2, float dark, float camEv, float camFlameNight);
+constexpr float kFlameKneeSoft = 0.5f;
+constexpr float kFlameSpill = 0.03f;
+// The roll-off of one channel at `u` times the knee: itself up to
+// kFlameKneeSoft, then a shoulder toward 1 (C1 at kFlameKneeSoft).
+float FlameKneeCurve(float u);
+// Flame light after exposure (scene light) as a camera's clip at `knee`
+// shows its colour: the peak channel's light kept, the others' ratios to it
+// as the clipped channels make them. Unchanged under kFlameKneeSoft * knee.
+Rgb FlameFilm(const Rgb& light, float knee);
+
 } // namespace Poseidon::remaster

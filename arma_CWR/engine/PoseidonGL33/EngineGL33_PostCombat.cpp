@@ -163,6 +163,8 @@ float ScatterMedium(fl::CombatLightKind kind, float core)
             return 2.0f * core + 0.3f;
         case fl::CombatLightKind::Tracer:
         case fl::CombatLightKind::Motor:
+        // (The fire spread's smoke is lit puff by puff, its plume its own.)
+        case fl::CombatLightKind::Wildfire:
             return 0.0f;
         case fl::CombatLightKind::Explosion:
             // The lit air of a detonation is its own fireball
@@ -273,6 +275,9 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
         }
         f.start = s.core;
         f.range = s.range;
+        // (the fire spread's lights all take the shaders' fast branch:
+        // a spread of at least a centimetre)
+        f.spread = r.kind == fl::CombatLightKind::Wildfire ? std::max(r.spread, 0.01f) : 0.0f;
         // Under the photoreal camera the dusk and
         // night exposure lifts every combat light several stops over the
         // classic frame's: a rifleman's flash left a flat yellow-white
@@ -313,6 +318,11 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                     warmG = 0.8f;
                     warmB = 0.56f;
                     break;
+                case fl::CombatLightKind::Wildfire:
+                    // The fire spread's flames: their owner sets the light's
+                    // power, colour, shape and reach, and its day and night
+                    // (CombatTuning::wildfire), against the sky as in nature.
+                    break;
                 case fl::CombatLightKind::Fire:
                     // (A burning wreck's fire at its roof lit the plain behind
                     // it out to 120 m: a strip along the horizon at dusk.)
@@ -338,7 +348,7 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
             // A steady light reads against the twilight
             // (CombatTwilight): the burning wreck's fire drew a warm line
             // along the dusk horizon behind it.
-            if (fl::CombatLightIsSteady(r.kind))
+            if (fl::CombatLightIsSteady(r.kind) && r.kind != fl::CombatLightKind::Wildfire)
                 gain *= std::min(std::max(set.Tuning().twilight, 0.0f), 1.0f);
             // The warmth at the same luminance.
             const float lum0 = 0.2126f * f.diffuse[0] + 0.7152f * f.diffuse[1] + 0.0722f * f.diffuse[2];
@@ -393,7 +403,10 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
     for (size_t i = 0; i < cands.size(); ++i)
     {
         const fl::CombatLightKind k = cands[i].record->kind;
-        const bool casts = k != fl::CombatLightKind::Tracer && k != fl::CombatLightKind::Motor;
+        // (The fire spread's lights stand for many flames over a block: no
+        // point-light shadow.)
+        const bool casts =
+            k != fl::CombatLightKind::Tracer && k != fl::CombatLightKind::Motor && k != fl::CombatLightKind::Wildfire;
         sc[i] = {cands[i].record->id, casts ? cands[i].score : 0.0f};
     }
     std::vector<int> channel(cands.size(), -1);

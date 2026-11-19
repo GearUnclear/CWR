@@ -109,6 +109,7 @@ extern int gPerfDrawCalls;
 constexpr double kTimeAccMin = 1.0;
 constexpr double kTimeAccMax = 4.0;
 
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <Poseidon/World/WorldSimHelpers.inc>
 
 // Test/debug render-view override.  When active, World::Simulate forces the
@@ -1777,6 +1778,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // flips; steps its records at CounterAttack::TickInterval.
         Guerrilla::CounterAttack::Instance().Simulate(deltaT);
         perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
+        // Spreading wildland fire (FIRE-SPREAD, POSEIDON_XP_FIRESPREAD; a no-op when off
+        // or when nothing has burnt).
+        firespread::SimulateWorld(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 

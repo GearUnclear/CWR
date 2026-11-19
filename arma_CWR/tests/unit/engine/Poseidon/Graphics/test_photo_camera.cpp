@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -498,6 +499,150 @@ TEST_CASE("PhotoCamera: the filmic curve passes middle grey, reaches white and k
     CHECK(core.g / core.r < 0.75f);
     CHECK(core.b / core.r < 0.4f);
     CHECK(core.b < 0.5f * core.g);
+}
+
+namespace
+{
+// A flame's light as the flame shader makes it (EngineGL33_FireFlameShaders.cpp
+// flameBlackBody: the combat lights' black body at unit luminance times
+// kFlameCoreNits at 1650 K on a gentler slope than Planck's, a white surface
+// under the reference sun 1 in scene light at 32000 cd/m2), at emissivity
+// `emis`, times the exposure `exposure`: scene light after exposure.
+Rgb FlameLight(float kelvin, float emis, float exposure)
+{
+    const Rgb c(1.0f, std::max(0.155f + (kelvin - 1500.0f) * 0.000207f, 0.05f), 0.0f);
+    const float nits = 4.0e4f * std::exp(16500.0f * (1.0f / 1650.0f - 1.0f / kelvin));
+    return c * (nits / 32000.0f * emis * exposure / Luminance(c));
+}
+
+// What the screen shows (display codes 0..1) of scene light after exposure,
+// through the composite's hue-keeping curve at the shipped tuning, with and
+// without the flames' clip.
+Rgb Shown(const Rgb& x, bool film)
+{
+    const LightingTuning t;
+    const ToneCurve curve = MakeToneCurve(t.camContrast, t.camShoulder, t.camWhite);
+    const Rgb y = ApplyToneCurveHueKeeping(curve, film ? FlameFilm(x, t.camFlameKnee) : x);
+    return {std::pow(y.r, 1.0f / 2.2f), std::pow(y.g, 1.0f / 2.2f), std::pow(y.b, 1.0f / 2.2f)};
+}
+
+float DisplayLuma(const Rgb& d)
+{
+    return 0.2126f * d.r + 0.7152f * d.g + 0.0722f * d.b;
+}
+
+float PeakOf(const Rgb& c)
+{
+    return std::max(c.r, std::max(c.g, c.b));
+}
+} // namespace
+
+TEST_CASE("PhotoCamera: the fire's flames take their own exposure and clip like a camera's channels",
+          "[Remaster][PhotoCamera][firespread]")
+{
+    // Their knobs are the camera's.
+    for (const char* key : {"camFlameNight", "camFlameKnee"})
+    {
+        const LightingKey* k = FindLightingKey(key);
+        REQUIRE(k);
+        CHECK(std::string(k->parent) == "photoLight");
+    }
+    const LightingTuning t;
+    // FlameDark: none by day, kFlameDarkDusk of it by 4 degrees under the
+    // horizon, all at full night, never falling as the sun goes down.
+    auto dark = [](float deg) { return FlameDark(CameraDusk(deg), CameraNight(deg)); };
+    CHECK(dark(30.0f) == 0.0f);
+    CHECK(dark(-4.0f) == Catch::Approx(kFlameDarkDusk).margin(0.01));
+    CHECK(dark(-15.0f) == Catch::Approx(1.0f));
+    float prev = -1.0f;
+    for (float deg = 30.0f; deg >= -15.0f; deg -= 0.5f)
+    {
+        CHECK(dark(deg) >= prev);
+        prev = dark(deg);
+    }
+    // The flames' exposure: the camera's by day; at full night a daylight
+    // exposure plus camFlameNight whatever the camera's night holds it to;
+    // never under the camera's own.
+    const float ref = std::log2(kMiddleGrey) - kDaylightMeanLog2 + t.camEv + t.camFlameNight;
+    CHECK(FlameExposureLog2(0.9f, 0.0f, t.camEv, t.camFlameNight) == 0.9f);
+    CHECK(FlameExposureLog2(kExposureNightMaxLog2, 1.0f, t.camEv, t.camFlameNight) == Catch::Approx(ref));
+    CHECK(FlameExposureLog2(ref + 2.0f, 1.0f, t.camEv, t.camFlameNight) == ref + 2.0f);
+    // Over a sunset the flames never dim, while the camera itself closes down
+    // (its dusk step, then the night's limit): day, dusk and night in order.
+    prev = -100.0f;
+    for (float deg = 30.0f; deg >= -15.0f; deg -= 0.5f)
+    {
+        const float night = CameraNight(deg);
+        const float camera = std::min(0.9f + kCameraDuskEv * CameraDusk(deg) * (1.0f - night),
+                                      kExposureMaxLog2 + (kExposureNightMaxLog2 - kExposureMaxLog2) * night);
+        const float e = FlameExposureLog2(camera, dark(deg), t.camEv, t.camFlameNight);
+        CAPTURE(deg, camera, e);
+        CHECK(e >= prev - 1e-4f);
+        prev = e;
+    }
+
+    // The clip: nothing changes under half the knee, the peak channel's light
+    // is kept, a grey light stays grey, and the roll-off is continuous.
+    const Rgb orange = FlameLight(1450.0f, 0.5f, 1.0f);
+    const Rgb low = orange * (0.49f * t.camFlameKnee / PeakOf(orange));
+    const Rgb lowFilm = FlameFilm(low, t.camFlameKnee);
+    CHECK(lowFilm.r == low.r);
+    CHECK(lowFilm.g == low.g);
+    CHECK(lowFilm.b == low.b);
+    const Rgb at = FlameFilm(orange * (0.5001f * t.camFlameKnee / PeakOf(orange)), t.camFlameKnee);
+    CHECK(at.g / at.r == Catch::Approx(orange.g / orange.r).margin(1e-3));
+    for (float k : {0.6f, 1.0f, 3.0f, 30.0f})
+    {
+        const Rgb x = orange * (k * t.camFlameKnee / PeakOf(orange));
+        const Rgb f = FlameFilm(x, t.camFlameKnee);
+        CAPTURE(k);
+        CHECK(f.r == Catch::Approx(x.r));
+        CHECK(f.g >= x.g);
+        CHECK(f.b >= x.b);
+        const Rgb grey = FlameFilm(Rgb(x.r, x.r, x.r), t.camFlameKnee);
+        CHECK(grey.g == Catch::Approx(x.r));
+        CHECK(grey.b == Catch::Approx(x.r));
+    }
+    CHECK(FlameKneeCurve(kFlameKneeSoft) == Catch::Approx(kFlameKneeSoft));
+    CHECK(FlameKneeCurve(1000.0f) < 1.0f);
+    CHECK(FlameFilm(orange * 10.0f, 0.0f).g == Catch::Approx(orange.g * 10.0f)); // no knee: off
+
+    // On screen (the wildfire consult 6a, the showcase checklist 1.2 and T6,
+    // T7), by day at the camera's exposure of an average sunlit scene: a
+    // flame's body (1450 K, half its light) keeps its orange-red (display G/R
+    // at most 0.47, as before); a deep core (1600 K, emissivity 0.8) is
+    // orange-yellow and brighter than sunlit grass (albedo 0.2 under the
+    // reference sun), where without the clip it could never be.
+    const float day = std::exp2(0.88f);
+    const Rgb grass = Shown(Rgb(0.19f, 0.19f, 0.19f) * day, false);
+    const Rgb body = Shown(FlameLight(1450.0f, 0.5f, day), true);
+    CHECK(body.g / body.r <= 0.47f);
+    CHECK(body.b < 0.05f);
+    const Rgb coreBefore = Shown(FlameLight(1600.0f, 0.8f, day), false);
+    const Rgb core = Shown(FlameLight(1600.0f, 0.8f, day), true);
+    CHECK(DisplayLuma(coreBefore) < DisplayLuma(grass));
+    CHECK(DisplayLuma(core) > DisplayLuma(grass));
+    CHECK(core.g / core.r > 0.6f);
+    CHECK(core.g / core.r < 0.9f);
+    CHECK(core.b < 0.5f * core.g);
+    // At night, at the flames' own exposure: the core clips to yellow-white
+    // (checklist T7: at least 230 green and 150 blue of 255), a flame pixel
+    // of a few tenths of the core's light (1450 K, emissivity 0.15: most of a
+    // drawn tongue) is orange-yellow, a thin edge (1300 K, emissivity 0.1)
+    // stays orange, and each is brighter than by day.
+    const float night = std::exp2(FlameExposureLog2(kExposureNightMaxLog2, 1.0f, t.camEv, t.camFlameNight));
+    const Rgb nightCore = Shown(FlameLight(1600.0f, 0.8f, night), true);
+    CHECK(nightCore.r > 0.99f);
+    CHECK(nightCore.g >= 230.0f / 255.0f);
+    CHECK(nightCore.b >= 150.0f / 255.0f);
+    const Rgb nightBody = Shown(FlameLight(1450.0f, 0.15f, night), true);
+    CHECK(nightBody.g / nightBody.r > 0.5f);
+    CHECK(nightBody.g / nightBody.r < 0.8f);
+    const Rgb nightEdge = Shown(FlameLight(1300.0f, 0.1f, night), true);
+    CHECK(nightEdge.g / nightEdge.r < 0.47f);
+    CHECK(DisplayLuma(nightCore) > DisplayLuma(core));
+    CHECK(DisplayLuma(nightBody) > DisplayLuma(body));
+    CHECK(DisplayLuma(nightEdge) > DisplayLuma(Shown(FlameLight(1300.0f, 0.1f, day), true)));
 }
 
 TEST_CASE("PhotoCamera: the white balance makes its target white and keeps white's luminance",

@@ -241,7 +241,7 @@ void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& 
         {
             t[8] = l.range;
             t[9] = static_cast<float>(l.shadowSlot + 1);
-            t[10] = 0.0f;
+            t[10] = l.spread;
             t[11] = 0.0f;
         }
         else

@@ -152,8 +152,98 @@ class Cloudlet: public Smoke
 
 	LSError Serialize(ParamArchive &ar) override {return LSOK;}
 
+    // A fire plume's puff (PlumePuff) lights itself (Object::DrawDecal): a gain
+    // on the scene's light on it, per channel and unclamped (its sun side, its
+    // shade inside the plume, the sun's angle), and the flames' light on its
+    // underside (linear, as a fire's combat light on smoke). False: a plain puff.
+    virtual bool PlumeLight(float gain[3], float fire[3]) const { return false; }
+
 	// basic element from which smoke trails are built
 	USE_FAST_ALLOCATOR;
+};
+
+// A puff of a fire's smoke plume (FirePlume.hpp has the law, FireSpreadWorld.cpp
+// FireWorld::EmitPlume the sources): born small at its source, it rides the
+// wind at its own height for minutes, rises and spreads with the plume, grows
+// and thins (it dies when the plume's survival falls under its own draw, its
+// smoke then carried by those that live on), and takes its colour from its
+// fuel and the distance it has come and its light from the sun's angle, its
+// place inside the plume and the flames below it.
+struct PlumePuffSpec
+{
+    Vector3 source = VZero;           // where it leaves (x, z) and the ground there (y), world m
+    float windX = 0.0f, windZ = 1.0f; // the wind's direction when it left (unit): its sideways axis
+    float riseK = 0.0f, finalX = 0.0f, baseM = 0.0f, hugM = 0.0f; // its plume's law (FirePlume.hpp PlumeLaw)
+    float bornM = 5.0f;                                           // its size when born (m)
+    float perMetre = 1.0f;                      // puffs its source makes a metre of the wind's travel when it left
+    float mass = 0.0f;                          // its share of the source's smoke (smoke units)
+    float load = 0.0f;                          // the whole fire's smoke a metre of the wind's travel (smoke units)
+    float opticK = 1.0f;                        // optical depth a smoke unit per square metre
+    float widthM = 50.0f;                       // the fire's width across the wind (m)
+    float acrossM = 0.0f;                       // where it left, across the wind from the fire's middle (m)
+    float lateral = 0.0f;                       // its place across the plume (-1..1) and ...
+    float vertical = 0.5f;                      // ... up through it (0 underside .. 1 top)
+    float draw = 0.5f;                          // its survival draw (0..1)
+    float woody = 0.0f;                         // its source's woody share (its colour)
+    float black = 0.0f;                         // (fire-objects) its source's black share (a wreck's, a house's)
+    float meanderSide = 0.0f, meanderUp = 0.0f; // the plume's slow wander when it left (-1..1)
+    float lifeSec = 600.0f;                     // the most it lives
+    // (followups) how many puffs its plume keeps behind each other side-on as
+    // they thin (FirePlume.hpp: the grass fire's kPuffOverlap, an object's own
+    // column kObjPuffOverlap)
+    float overlap = 3.5f;
+};
+
+class PlumePuff : public Cloudlet
+{
+    typedef Cloudlet base;
+
+  public:
+    PlumePuff(LODShapeWithShadow* shape, const PlumePuffSpec& spec);
+    ~PlumePuff() override;
+
+    void Simulate(float deltaT, SimulationImportance prec) override;
+    void Draw(int level, ClipFlags clipFlags, const FrameBase& frame) override;
+    bool PlumeLight(float gain[3], float fire[3]) const override;
+
+    // For the fire's stats line: how far it has come downwind (m), its middle
+    // over its source's ground and its place across the plume (m), its alpha,
+    // whether it is a torching crown's (no ground hug), and how many live.
+    float TravelM() const { return _x; }
+    float RiseM() const { return Position().Y() - _spec.source.Y(); }
+    float SideM() const { return _side; }
+    float Opacity() const { return _opacity; }
+    // Its alpha before the fade round the eye (the plume's shadow takes it,
+    // so the shadow never depends on where the camera is).
+    float BodyOpacity() const { return _bodyOpacity; }
+    float FireLight() const { return _fire[0]; }
+    bool Crown() const { return _spec.hugM <= 0.0f; }
+    static int Alive();
+
+    USE_FAST_ALLOCATOR;
+
+  private:
+    // Places it on the plume, sizes it and sets its colour and alpha, `dt`
+    // seconds after the last time (0 at its birth).
+    void Place(float dt);
+
+    PlumePuffSpec _spec;
+    float _age = 0.0f;
+    float _x = 0.0f;                           // the distance it has travelled downwind (m)
+    float _travelX = 0.0f, _travelZ = 0.0f;    // and where to (m)
+    float _agl = 2.0f;                         // its height over the ground (m)
+    float _side = 0.0f;                        // its place across the plume (m)
+    float _tau = 0.0f;                         // its own optical depth now
+    float _opacity = 0.0f;                     // its alpha now (0..1)
+    float _bodyOpacity = 0.0f;                 // and before the fade round the eye
+    float _offAcross = 0.0f, _offUp = 0.0f;    // its place in the plume's cross-section, from its middle (m)
+    float _semiAcross = 1.0f, _semiUp = 1.0f;  // the cross-section's half width and half thickness (m)
+    float _density = 0.0f;                     // the plume's optical depth a metre where it is
+    float _plumeTopTau = 0.0f;                 // the plume's optical depth from above where it is
+    float _fire[3] = {0.0f, 0.0f, 0.0f};       // the flames' light on it (linear), eased ...
+    float _fireTarget[3] = {0.0f, 0.0f, 0.0f}; // ... toward this
+    float _fireTimer = 0.0f;
+    bool _fireValid = false;
 };
 
 class CloudletSource: public SerializeClass
@@ -331,9 +421,13 @@ class SmokeSource: public CloudletSource
 	float _timeToLive;
 	float _in,_inTime,_inInv;
 	float _out,_outTime,_outInv;
+	// (fire-objects) Its timing runs on but it makes no puffs (a wreck the
+	// fire lane burns on: its smoke is the fire's own).
+	bool _quiet = false;
 
 	public:
 	SmokeSource(LODShapeWithShadow *shape = nullptr, float density = 1.0, float size = 1.0);
+	void SetQuiet(bool quiet) { _quiet = quiet; }
 
 	bool Simulate
 	(
@@ -426,6 +520,9 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
     lighting::Detonation _deflagration;
     // A burning wreck's smoke (SmokeSourceOnVehicle): its embers glow.
     virtual bool GlowsAsWreck() const { return false; }
+    // (fire-objects) The fire lane burns this wreck on (FireSpreadWorld.hpp
+    // NotifyWreck): its own smoke, ember light and NotifyBurning stop.
+    bool _objectFire = false;
 };
 
 class SmokeSourceOnVehicle: public SmokeSourceVehicle,public AttachedOnVehicle

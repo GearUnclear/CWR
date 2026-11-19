@@ -73,6 +73,18 @@ inline void ReadOnly(bool hasStencil, const StencilTag& tag = {})
         detail::StencilAlwaysReplace(tag);
 }
 
+// Depth test on, write off, and the stencil test off: a translucent pass
+// drawn outside the per-draw pipeline that must leave every stencil tag as
+// it is (the fire spread's flame sheets). The caller restores the stencil
+// test it found.
+inline void ReadOnlyNoStencil()
+{
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_STENCIL_TEST);
+}
+
 // Depth test always passes, no write — 2D overlay draws.
 inline void Disabled(bool hasStencil, const StencilTag& tag = {})
 {
@@ -110,6 +122,13 @@ inline void AlwaysWrite()
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_ALWAYS);
     glDepthMask(GL_TRUE);
+}
+
+// Only the depth write mask, the test as it is: a draw repeated into another
+// target that must not write its depth there (EngineGL33::BeginFireFlameCover).
+inline void DepthWrite(bool on)
+{
+    glDepthMask(on ? GL_TRUE : GL_FALSE);
 }
 
 // Stencil test only, nothing written: a fullscreen pass that draws where

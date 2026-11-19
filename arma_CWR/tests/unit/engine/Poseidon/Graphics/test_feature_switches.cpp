@@ -353,7 +353,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         ++children;
     }
     CHECK(taaChildren == 3);
-    constexpr int kPhotoLightKnobs = 18; // test_photo_camera.cpp
+    constexpr int kPhotoLightKnobs = 20; // test_photo_camera.cpp (the fire's flames: camFlameNight, camFlameKnee)
     constexpr int kVolFogKnobs = 5;
     CHECK(children == 36 + kPhotoLightKnobs + kVolFogKnobs);
 }

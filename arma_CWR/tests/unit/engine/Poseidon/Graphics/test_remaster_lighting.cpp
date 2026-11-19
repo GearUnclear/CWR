@@ -13,6 +13,7 @@
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/Graphics/Remaster/SkyDensity.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
 #include <algorithm>
@@ -1568,6 +1569,11 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litCameraLook", LC::CameraLook, 1},
         {"litWater2", LC::Water2, 1},
         {"litXpNight", LC::XpNight, 1},
+        {"litBurnRect", LC::BurnRect, 1},
+        {"litBurnGround", LC::BurnGround, 1},
+        {"litBurnHeat", LC::BurnHeat, 1},
+        {"litPlumeInfo", LC::PlumeInfo, 1},
+        {"litPlume", LC::PlumeShadow, LC::PlumeShadowSlots},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1665,7 +1671,16 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Water2) == static_cast<int>(LC::CameraLook) + 1);
     // The experiment xp-nightlight's slot follows the experimental water slot.
     CHECK(static_cast<int>(LC::XpNight) == static_cast<int>(LC::Water2) + 1);
-    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpNight) + 1);
+    // The fire spread's scorched ground follows it.
+    CHECK(static_cast<int>(LC::BurnRect) == static_cast<int>(LC::XpNight) + 1);
+    // And its atlas layout (the burn rows, then the land's height grid) follows that.
+    CHECK(static_cast<int>(LC::BurnGround) == static_cast<int>(LC::BurnRect) + 1);
+    // The firelight's heat grids in the same atlas follow it.
+    CHECK(static_cast<int>(LC::BurnHeat) == static_cast<int>(LC::BurnGround) + 1);
+    // The fire's plume shadow (its info slot, then two slots a blob) follows them.
+    CHECK(static_cast<int>(LC::PlumeInfo) == static_cast<int>(LC::BurnHeat) + 1);
+    CHECK(static_cast<int>(LC::PlumeShadow) == static_cast<int>(LC::PlumeInfo) + 1);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::PlumeShadow) + LC::PlumeShadowSlots);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1679,17 +1694,20 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
 {
     // The table's units are distinct, clear of the material units 0 and 1 and
     // the upload unit 7, and within the 16 units GL 3.3 guarantees, except the
-    // decal batch's array (W4-1) on unit 16: 0 to 15 are all taken, and GL 3.3
-    // guarantees 48 combined units (the sampler count per program stays 16).
+    // decal batch's array (W4-1) on unit 16 and the fire spread's burn map on
+    // unit 17: 0 to 15 are all taken, and GL 3.3 guarantees 48 combined units
+    // (the sampler count per program stays 16).
     std::set<int> units;
     std::set<std::string> names;
     CHECK(gl::kDecalLayerUnit == 16);
+    CHECK(gl::kBurnMapUnit == 17);
     for (const auto& s : gl::kLitSamplers)
     {
         CAPTURE(s.name, s.unit);
         CHECK(s.unit >= 2);
         CHECK(s.unit != 7);
-        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers")));
+        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers") ||
+               (s.unit == gl::kBurnMapUnit && std::string(s.name) == "burnMap")));
         CHECK(units.insert(s.unit).second);
         CHECK(names.insert(s.name).second);
     }
@@ -1719,6 +1737,660 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
         CAPTURE(name);
         CHECK(declared.count(name) == 1);
     }
+    // Each program keeps within the 16 samplers a fragment stage is
+    // guaranteed: the burn atlas (the burn map and the land's height grid in
+    // one texture, so the objects need one sampler for both) is declared by
+    // the object, land and grass mains only, never by the sea's, which reads
+    // its next frame on top of the shared set.
+    for (const std::string& program : RemasterPrograms())
+    {
+        std::set<std::string> own;
+        for (auto it = std::sregex_iterator(program.begin(), program.end(), sampler); it != std::sregex_iterator();
+             ++it)
+            own.insert((*it)[1].str());
+        CAPTURE(own.size());
+        CHECK(own.size() <= 16);
+    }
+    const std::string common = gl::RemasterFragmentCommon();
+    for (int ps = 0; ps <= 2; ++ps) // PSNormal, PSDetail, PSGrass
+    {
+        CAPTURE(ps);
+        const std::string main = gl::RemasterFragmentMain(ps);
+        CHECK(main.find("uniform sampler2D burnMap;") != std::string::npos);
+        std::set<std::string> own;
+        const std::string program = common + main;
+        for (auto it = std::sregex_iterator(program.begin(), program.end(), sampler); it != std::sregex_iterator();
+             ++it)
+            own.insert((*it)[1].str());
+        CHECK(own.size() <= 16);
+    }
+    CHECK(std::string(gl::RemasterFragmentMain(3)).find("burnMap") == std::string::npos); // PSWater
+    CHECK(common.find("uniform sampler2D burnMap;") == std::string::npos);
+}
+
+TEST_CASE("Fire spread: the scorched ground and the char stay off while litBurnRect.w is 0",
+          "[Graphics][Shaders][remaster][firespread]")
+{
+    // Every read of the burn atlas sits behind litBurnRect.w (zero while the
+    // fire is off or nothing has burnt), and the char class rides in
+    // surfClass.w, which the backend writes 0 for every draw while the atlas
+    // is not bound (EngineGL33_Surface.cpp).
+    const std::string object = gl::RemasterFragmentMain(0);
+    // (followups) the char classes 1 and 2; a burning wreck's (3 and up) its own gate after it
+    const size_t gate = object.find("if (litBurnRect.w > 0.5 && surfClass.w > 0.5 && surfClass.w < 2.5)");
+    REQUIRE(gate != std::string::npos);
+    for (const char* call : {"burnObjectAt(", "burnObject(", "burnLeaves(", "burnLeafGone(", "burnTexel("})
+    {
+        CAPTURE(call);
+        const size_t at = object.find(call);
+        REQUIRE(at != std::string::npos);
+        CHECK(at > gate);
+    }
+    const size_t wreckGate = object.find("if (litBurnRect.w > 0.5 && surfClass.w > 2.5)");
+    REQUIRE(wreckGate != std::string::npos);
+    CHECK(wreckGate > gate);
+    CHECK(object.find("burnWreck(") > wreckGate);
+    const std::string land = gl::RemasterFragmentMain(1);
+    CHECK(land.find("burnAt(") > land.find("litBurnRect.w > 0.5"));
+    const std::string grass = gl::RemasterFragmentMain(2);
+    CHECK(grass.find("burnAt(") > grass.find("litBurnRect.w > 0.5"));
+    // The burn rows are read clear of the height rows after them, and the
+    // height grid inside its own rows and columns.
+    const std::string surface = Piece(gl::FragmentPiece::Surface);
+    CHECK(surface.find("min(uv.y * litBurnGround.x, litBurnGround.x - 0.5 * litBurnGround.w)") != std::string::npos);
+    CHECK(surface.find("clamp((xz - litBurnRect.xy) * litBurnRect.z * n, vec2(0.5), vec2(n - 0.5))") !=
+          std::string::npos);
+    // Charred surfaces are matt on both specular paths, each behind the gate.
+    const std::string shade = Piece(gl::FragmentPiece::Shade);
+    CHECK(CountOf(shade, "litBurnRect.w > 0.5 && g_burnSpec < 1.0") == 2);
+    // The firelight: the land, the grass and the objects take it inside their
+    // gates, only the land its embers, and the shading adds it only behind
+    // the gate (both globals start at zero).
+    CHECK(object.find("burnFireLight(") > gate);
+    CHECK(land.find("burnFireLight(") > land.find("litBurnRect.w > 0.5"));
+    CHECK(land.find("burnEmbers(") > land.find("litBurnRect.w > 0.5"));
+    CHECK(grass.find("burnFireLight(") > grass.find("litBurnRect.w > 0.5"));
+    CHECK(grass.find("burnEmbers(") == std::string::npos);
+    CHECK(object.find("burnEmbers(") == std::string::npos);
+    CHECK(surface.find("vec3 g_fireLight = vec3(0.0);") != std::string::npos);
+    CHECK(surface.find("vec3 g_fireEmit = vec3(0.0);") != std::string::npos);
+    // The fire's light is combat light on the rig's scale, its embers scene
+    // light, both only behind the gate (the showcase audit's fix 5).
+    CHECK(shade.find("if (litBurnRect.w > 0.5) combat += kd * g_fireLight;") != std::string::npos);
+    CHECK(shade.find("if (litBurnRect.w > 0.5 && any(greaterThan(g_fireEmit, vec3(0.0))))") != std::string::npos);
+    CHECK(surface.find("g_fireLight = kFireLight * (halo * facing * lift);") != std::string::npos);
+    // The heat grids are read only through burnHeatAt, which returns 0 without them.
+    CHECK(surface.find("if (n < 0.5) return 0.0;") != std::string::npos);
+}
+
+TEST_CASE("Fire spread: the plants' own fire reads the plant table as the fire lays it out",
+          "[Graphics][Shaders][remaster][firespread]")
+{
+    // A tree's or a bush's leaves and bark follow its own fire (the plant
+    // table, FireSpreadWorld.hpp PlantTable) inside the object main's burn
+    // gate, and only while the table is there (litBurnHeat.w); the shader's
+    // bucket hash, probing, key tolerance, slot size, clock wrap and field
+    // indices are the fire's own.
+    namespace fs = Poseidon::firespread;
+    const std::string object = gl::RemasterFragmentMain(0);
+    const size_t gate = object.find("if (litBurnRect.w > 0.5 && surfClass.w > 0.5 && surfClass.w < 2.5)");
+    REQUIRE(gate != std::string::npos);
+    for (const char* call : {"burnPlantAt(", "plantLeaves(", "plantBark("})
+    {
+        CAPTURE(call);
+        const size_t at = object.find(call);
+        REQUIRE(at != std::string::npos);
+        CHECK(at > gate);
+    }
+    // The table is looked for before the burn map, which only what it does
+    // not know (a forest block) reads.
+    CHECK(object.find("burnPlantAt(") < object.find("burnObjectAt("));
+    const std::string surface = Piece(gl::FragmentPiece::Surface);
+    CHECK(surface.find("if (litBurnHeat.w < 0.5) return ivec2(-1);") != std::string::npos);
+    const size_t hash = surface.find("uint s = uint(b.x) * 73856093u ^ uint(b.y) * 19349663u;");
+    REQUIRE(hash != std::string::npos);
+    for (const char* step : {"s ^= s >> 16;", "s *= 0x85ebca6bu;", "s ^= s >> 13;", "s *= 0xc2b2ae35u;", "s &= mask;"})
+    {
+        CAPTURE(step);
+        CHECK(surface.find(step, hash) != std::string::npos);
+    }
+    std::uint32_t mixed = 3U * 73856093U ^ 7U * 19349663U;
+    mixed ^= mixed >> 16;
+    mixed *= 0x85ebca6bU;
+    mixed ^= mixed >> 13;
+    mixed *= 0xc2b2ae35U;
+    mixed ^= mixed >> 16;
+    CHECK(fs::PlantBucketHash(3, 7) == mixed);
+    CHECK(surface.find("const int kPlantSlotFloats = " + std::to_string(fs::kPlantSlotFloats) + ";") !=
+          std::string::npos);
+    CHECK(surface.find("const int kPlantProbes = " + std::to_string(fs::kPlantProbes) + ";") != std::string::npos);
+    CHECK(surface.find("const float kPlantKeyNear = 0.06;") != std::string::npos);
+    CHECK(fs::kPlantKeyNearM == Catch::Approx(0.06f));
+    CHECK(surface.find("const float kPlantClockWrap = 628.31853;") != std::string::npos);
+    CHECK(fs::kPlantClockWrap == Catch::Approx(628.31853));
+    CHECK(surface.find("if (kx < -1.0e8) break;") != std::string::npos);
+    CHECK(fs::kPlantEmpty < -1.0e8f);
+    CHECK(surface.find("if (contact > 1.0e8) return -1.0;") != std::string::npos);
+    CHECK(fs::kPlantNotYet > 1.0e8f);
+    CHECK(fs::kPlantLongAgo < -0.5f);
+    CHECK(fs::kPlantSlotsPerRow * fs::kPlantSlotFloats == 512); // the burn atlas's width
+    // Each field the shader reads at its own index.
+    const std::pair<const char*, int> fields[] = {
+        {"plantField(map, at, 2)", fs::kPlantY},
+        {"plantField(map, at, 3)", fs::kPlantH},
+        {"plantField(map, at, 4)", fs::kPlantContact},
+        {"plantField(map, at, 5)", fs::kPlantDirX},
+        {"plantField(map, at, 6)", fs::kPlantDirZ},
+        {"plantField(map, at, 7)", fs::kPlantScorchTop},
+        {"plantField(map, at, 8)", fs::kPlantScorchRise},
+        {"plantField(map, at, 9)", fs::kPlantBarkWind},
+        {"plantField(map, at, 10)", fs::kPlantBarkLee},
+        {"plantField(map, at, 11)", fs::kPlantBurn0},
+        {"plantField(map, at, 12)", fs::kPlantBurn1},
+        {"plantField(map, at, 13)", fs::kPlantSweepMax},
+        {"plantField(map, at, 14)", fs::kPlantGoneThreshold},
+        {"plantField(map, at, 15)", fs::kPlantKeptChar},
+        {"plantField(map, at, 16)", fs::kPlantFrameTop},
+        {"plantField(map, at, 17)", fs::kPlantKeepBelow},
+        {"plantField(map, at, 18)", fs::kPlantClump},
+        {"plantField(map, at, 19)", fs::kPlantGlow},
+        {"plantField(map, at, 20)", fs::kPlantScorchChar},
+        {"plantField(map, at, 21)", fs::kPlantStrands},
+    };
+    for (const auto& [text, index] : fields)
+    {
+        CAPTURE(text);
+        CHECK(surface.find(text) != std::string::npos);
+        CHECK(std::string(text) == "plantField(map, at, " + std::to_string(index) + ")");
+    }
+}
+
+TEST_CASE("Fire spread: the flame sheets' shaders compile and match their draw", "[Graphics][Shaders][firespread]")
+{
+    GlslangInit init;
+    // Both variants: the flipbook and the procedural fallback.
+    for (const bool flipbook : {true, false})
+    {
+        CAPTURE(flipbook);
+        const std::string vs = gl::FireFlameVertexSource(flipbook);
+        const std::string fs = gl::FireFlameFragmentSource(flipbook);
+        std::string log;
+        const bool vsOk = Compiles(vs, EShLangVertex, log);
+        CAPTURE(log);
+        CHECK(vsOk);
+        const bool fsOk = Compiles(fs, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(fsOk);
+        // The varyings the vertex shader writes are the ones the flame reads.
+        CHECK(Varyings(vs, "out") == Varyings(fs, "in"));
+        // The flame reads the rig's block (the camera, the haze) pasted whole,
+        // and the camera's encoding.
+        CHECK(CountOf(fs, gl::LitConstantsBlock()) == 1);
+        CHECK(fs.find(gl::kCameraCodecGLSL) != std::string::npos);
+        // The strip the backend draws: kFlameRows rows of two vertices, 16 in
+        // all (EngineGL33_FireFlames.cpp kFlameStripVertices), from three
+        // instanced vec4 attributes.
+        CHECK(vs.find("const int kFlameRows = 8;") != std::string::npos);
+        for (const char* attr : {"layout(location = 0) in vec4 aFoot;", "layout(location = 1) in vec4 aShape;",
+                                 "layout(location = 2) in vec4 aSeed;"})
+        {
+            CAPTURE(attr);
+            CHECK(vs.find(attr) != std::string::npos);
+        }
+        CHECK((vs.find("#define FLAME_FLIPBOOK 1") != std::string::npos) == flipbook);
+        // It writes the frame and, like smoke, the surface target; both fade
+        // against the scene's depth (the soft particles), off while
+        // flameDepthMap.y is 0.
+        CHECK(fs.find("layout(location = 0) out vec4 fragColor;") != std::string::npos);
+        CHECK(fs.find("layout(location = 1) out vec4 fragSurf;") != std::string::npos);
+        CHECK(fs.find("uniform sampler2D flameDepth;") != std::string::npos);
+        CHECK(fs.find("if (flameDepthMap.y == 0.0) return 1.0;") != std::string::npos);
+        CHECK(CountOf(fs, "flameSoftFade") >= 2); // its definition and the main's use
+        // Only the flipbook reads the flipbook.
+        CHECK((fs.find("uniform sampler2DArray flameBook;") != std::string::npos) == flipbook);
+    }
+    // The procedural flame's scroll wraps on the noise lattice's period, so it never jumps.
+    const std::string procedural = gl::FireFlameFragmentSource(false);
+    CHECK(procedural.find("mod(time * rise / cell.y, 2.0 * kFlamePeriod)") != std::string::npos);
+    CHECK(procedural.find("i = mod(i, kFlamePeriod);") != std::string::npos);
+    // The flipbook's frame and the quad agree on where each style's flame tip
+    // sits in it (FireSpreadWorld.hpp kFlameTipShare, as the generator
+    // measures it), and it blends two frames of its 128 (the backend's layers).
+    const std::string book = gl::FireFlameFragmentSource(true);
+    const std::string share = "const vec4 kFlipFlameShare = vec4(0.551, 0.566, 0.523, 0.543);";
+    CHECK(book.find(share) != std::string::npos);
+    CHECK(std::string(gl::FireFlameVertexSource(true)).find(share) != std::string::npos);
+    CHECK(Poseidon::firespread::kFlameTipShare[0] == Catch::Approx(0.551f));
+    CHECK(Poseidon::firespread::kFlameTipShare[1] == Catch::Approx(0.566f));
+    CHECK(Poseidon::firespread::kFlameTipShare[2] == Catch::Approx(0.523f));
+    CHECK(Poseidon::firespread::kFlameTipShare[3] == Catch::Approx(0.543f));
+    // A frame is one tongue on a ribbon kFlameFrameAspect of its height wide
+    // (gen_flame_flipbook.py FRAME_W / FRAME_H), read across the ribbon as it
+    // is, never wrapped.
+    CHECK(Poseidon::firespread::kFlameFrameAspect == Catch::Approx(0.5f));
+    CHECK(Poseidon::firespread::FlameFrameWidth(0, 1.0f) == Catch::Approx(0.5f / 0.551f));
+    CHECK(book.find("vec2 uv = vec2(0.5 + 0.5 * flip * (vSheet.x + dWarp.x / max(halfW, 1e-3)), (vSheet.y + dWarp.y) / "
+                    "frameH);") != std::string::npos);
+    CHECK(book.find("if (alone && max(s.r, s.g) < kFlipEmpty) discard;") != std::string::npos);
+    CHECK(book.find("float frameH = height / kFlipFlameShare[style];") != std::string::npos);
+    CHECK(book.find("const float kFlipFrames = 128.0;") != std::string::npos);
+    CHECK(CountOf(book, "texture(flameBook,") == 2);
+    // Four styles (FireSpreadWorld.hpp kFlameStyles), style-major in the
+    // array, each sheet's from its instance (aSeed.z). The frames are
+    // physical fields (gen_flame_flipbook.py "Physical fields": R the
+    // temperature, G the soot's optical depth; the emissivity rebuilt from R
+    // as bake() makes it) and the light is a black body's in scene light.
+    CHECK(book.find("const float kFlipStyles = 4.0;") != std::string::npos);
+    CHECK(book.find("float layer0 = float(style) * kFlipFrames;") != std::string::npos);
+    CHECK(std::string(gl::FireFlameVertexSource(true)).find("vStyle = aSeed.z;") != std::string::npos);
+    CHECK(book.find("const float kFlipGlow = 1.0;") != std::string::npos);
+    CHECK(book.find("const vec4 kFlipStyleLight") != std::string::npos);
+    CHECK(book.find("const float kFlipK0 = 600.0;") != std::string::npos);
+    CHECK(book.find("const float kFlipKSpan = 1000.0;") != std::string::npos);
+    CHECK(book.find("const float kFlipTauMax = 4.0;") != std::string::npos);
+    CHECK(book.find("float simT = (k - kFlipSimKCold) / kFlipSimKPerT;") != std::string::npos);
+    // The emissivity is the sheet's own (from its flame's optical path, aOptic.x).
+    CHECK(book.find("float zone = smoothstep(bodyLo, bodyHi, simT);") != std::string::npos);
+    // Seen toward end on the sight line runs through more of the tongue: its
+    // side-on optical depth times vGain (the vertex shader's 1 / sin of the
+    // angle to the axis, at most kFlameGainMax).
+    CHECK(book.find("float emis = 1.0 - pow(1.0 - min(vEmis, 0.999), vGain);") != std::string::npos);
+    CHECK(book.find("float eps = emis * zone * fade;") != std::string::npos);
+    // The medium's smoke is only outside the luminous zone (no grey veil over the body).
+    CHECK(book.find("tau *= (1.0 - zone) * smoothstep(0.0, kFlipSootFrom,") != std::string::npos);
+    CHECK(std::string(gl::FireFlameVertexSource(true)).find("vEmis = clamp(aOptic.x, 0.0, 1.0);") != std::string::npos);
+    // Close up only, fine detail the flipbook cannot hold: a warp climbing
+    // with the gas (the backend's per-sheet scroll, aSeed.w, in the noise's
+    // cells, wrapping on its lattice's period), faded out by the pixel's
+    // footprint, so far flames are the flipbook's alone.
+    CHECK(std::string(gl::FireFlameVertexSource(true)).find("vScroll = aSeed.w;") != std::string::npos);
+    CHECK(book.find("float closeUp = 1.0 - smoothstep(kDetailNearCells, kDetailFarCells, foot / cell);") !=
+          std::string::npos);
+    CHECK(book.find("i = mod(i, kDetailPeriod);") != std::string::npos);
+    CHECK(book.find("const float kDetailPeriod = 289.0;") != std::string::npos);
+    CHECK(book.find("const float kFlipBodyLo = 0.12;") != std::string::npos);
+    CHECK(book.find("const float kFlipBodyHi = 0.45;") != std::string::npos);
+    // The calibration: a white surface under the rig's reference sun (1.0 in
+    // scene light) is about 32000 cd/m2; the flame's luminance anchored on
+    // luminance (a 1650 K core at 4e4 cd/m2 at emissivity 1, a gentler slope
+    // than Planck's); its colour the combat lights' black body
+    // (CombatLights.cpp BlackBodyRgb). The luminous gas hides what is behind
+    // it as much as it glows (Kirchhoff), the soot the rest.
+    CHECK(book.find("const float kFlameNitToScene = 1.0 / 32000.0;") != std::string::npos);
+    CHECK(book.find("const float kFlameCoreK = 1650.0;") != std::string::npos);
+    CHECK(book.find("const float kFlameCoreNits = 4.0e4;") != std::string::npos);
+    CHECK(book.find("const float kFlameSlopeK = 16500.0;") != std::string::npos);
+    CHECK(book.find("const float kFlipGasOcclusion = 1.0;") != std::string::npos);
+    // FLIPDEBUG reads the full resolution only.
+    // (and the coarse read that skips the empty air round a tongue before any other work)
+    // (a small or far tongue reads the far book: fix 08, its own test)
+    // (and a volume tongue's two reads a sample and its coarse skip, fix 6)
+    CHECK(CountOf(book, "textureLod(flameBook,") == 8);
+    CHECK(book.find("kFlipSmallM") == std::string::npos);
+    // (and its near fade scaled to its frame: a flamelet shows close to the eye)
+    CHECK(book.find("gFlameNearFrom = min(kFlameNearFrom, kFlameNearFromFrames * frameH);") != std::string::npos);
+    CHECK(book.find("if (alone && max(sc.r, sc.g) < kFlipEmpty) discard;") != std::string::npos);
+    // Its colour the combat lights' black body, lit at the simulation's temperature.
+    CHECK(book.find("max(0.155 + (t - 1500.0) * 0.000207, 0.05)") != std::string::npos);
+    // At the flames' own exposure (PhotoCamera.hpp FlameExposureLog2: log2,
+    // 0 by day and at the uniform's default), in the black body itself, so
+    // every light the flames make takes it; the procedural flame's light too.
+    CHECK(book.find("return c * (nits * kFlameNitToScene * exp2(flameExpose.x) / dot(c, kFlameLuma));") !=
+          std::string::npos);
+    CHECK(procedural.find("exp2(flameExpose.x)") != std::string::npos);
+    for (const std::string* fs : {&book, &procedural})
+        CHECK(fs->find("uniform vec4 flameExpose;") != std::string::npos);
+    CHECK(book.find("float kLight = k + vTemp.x") != std::string::npos);
+    // Each tongue is an axial billboard: a ribbon along its bent axis, its
+    // width square to the axis and the sight line (every row the way the whole
+    // tongue's points, so it never twists), closing into a round body seen
+    // along its axis, its optical depth growing toward end on.
+    {
+        const std::string vsBook = gl::FireFlameVertexSource(true);
+        CHECK(vsBook.find("vec3 rr = cross(axis, e);") != std::string::npos);
+        CHECK(vsBook.find("rr = dot(rr, rMid) < 0.0 ? -rr : rr;") != std::string::npos);
+        CHECK(vsBook.find("float blob = 1.0 - smoothstep(kEndOnTo, kEndOnFrom, sinA);") != std::string::npos);
+        CHECK(vsBook.find("vGain = min(kFlameGainMax, 1.0 / max(lr, 1e-3));") != std::string::npos);
+        CHECK(vsBook.find("const float kFlameGainMax = 2.0;") != std::string::npos);
+        // No persistent band and no lean-squeezed read: the frame is the tongue.
+        for (const char* gone : {"kPersistTop", "vLeanCos", "kEdgeRag"})
+        {
+            CAPTURE(gone);
+            CHECK(book.find(gone) == std::string::npos);
+            CHECK(vsBook.find(gone) == std::string::npos);
+        }
+    }
+    // The soot is a medium: exp(-tau) through, the sky and the sun scattered.
+    CHECK(book.find("float sootT = exp(-tau);") != std::string::npos);
+    CHECK(book.find("float occ = emis * pow(zone, kEdgeOccPow) * fade;") != std::string::npos);
+    CHECK(book.find("transOut = (1.0 - kFlipGasOcclusion * occ) * sootT;") != std::string::npos);
+    CHECK(book.find("flameWrite(light, trans);") != std::string::npos);
+    for (const char* gone : {"flipRamp", "kFlipHot", "kFlipEmitMax", "flameFinish"})
+    {
+        CAPTURE(gone);
+        CHECK(book.find(gone) == std::string::npos);
+    }
+    // The procedural flame keeps its own tail, into the same output.
+    CHECK(procedural.find("void flameFinish(") != std::string::npos);
+    // Both write linear light into the flame target (a: the transmittance)
+    // or, without it, coded into the frame (flameOut.x).
+    for (const std::string* fs : {&book, &procedural})
+    {
+        CHECK(fs->find("fragColor = vec4(lit, trans);") != std::string::npos);
+        CHECK(fs->find("if (flameOut.x > 0.5) {") != std::string::npos);
+    }
+    // The merge compiles with the post vertex shader, decodes the frame
+    // (camDecode or the display's gamma), adds, codes it again, and copies a
+    // pixel without flames as it is.
+    {
+        const std::string merge = gl::FireFlameMergeSource();
+        std::string log;
+        const bool ok = Compiles(merge, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+        CHECK(merge.find(gl::kCameraCodecGLSL) != std::string::npos);
+        // The flames take the volumetric fog up to their own depth: their
+        // light dims by its transmittance there, what they hide becomes the
+        // air's light in front of them. Under the camera their light is laid
+        // on as the camera's clip shows it (PhotoCamera.hpp FlameFilm, the
+        // merge's flameFilm with flameFilmK), the frame behind as it is.
+        CHECK(merge.find("vec3 flame = camera ? flameFilm(light * T) : light * T;") != std::string::npos);
+        CHECK(merge.find("(camera ? camDecode(c.rgb) : flameToLinear(c.rgb)) * trans + flame + S * (1.0 - trans)") !=
+              std::string::npos);
+        CHECK(
+            merge.find("vec3 code = camera ? camFold(flameFilm(light)) : pow(flameTonemap(light), vec3(1.0 / 2.2));") !=
+            std::string::npos);
+        CHECK(merge.find("uniform vec4 flameFilmK;") != std::string::npos);
+        // The shader's clip is PhotoCamera.cpp's (its knee's soft start, the
+        // channel's roll-off, the spill of the clipped channels).
+        CHECK(merge.find("const float kFlameKneeSoft = 0.5;") != std::string::npos);
+        CHECK(Poseidon::remaster::kFlameKneeSoft == Catch::Approx(0.5f));
+        CHECK(merge.find(
+                  "return 1.0 - (1.0 - kFlameKneeSoft) * (1.0 - kFlameKneeSoft) / (u - 2.0 * kFlameKneeSoft + 1.0);") !=
+              std::string::npos);
+        CHECK(merge.find("float spill = flameFilmK.w * dot(max(u - 1.0, vec3(0.0)), vec3(1.0));") != std::string::npos);
+        CHECK(merge.find(
+                  "if (flameFilmK.x < 0.5 || peak * flameFilmK.y <= kFlameKneeSoft * flameFilmK.z) return light;") !=
+              std::string::npos);
+        CHECK(merge.find("if (trans >= 1.0 && max(light.r, max(light.g, light.b)) <= 0.0) {") != std::string::npos);
+        CHECK(merge.find("uniform sampler3D fogVolume;") != std::string::npos);
+        // The half-resolution target is upsampled against the full
+        // resolution's depth: each texel's flames kept only where the scene
+        // lies behind them.
+        CHECK(merge.find("vec2 hp = (vec2(p) + 0.5) * flameMergeDebug.y - 0.5;") != std::string::npos);
+        CHECK(merge.find("keep = flameMergeDebug.x > 0.5 ? 1.0 : clamp((sceneZ - zf + m) / m, 0.0, 1.0);") !=
+              std::string::npos);
+        // The TAA's particle mask learns of the flames through its opaque copy.
+        CHECK(merge.find("layout(location = 1) out vec4 fragMark;") != std::string::npos);
+        // Smoke over the flames (fix 02): the flames' light dims by the
+        // smoke's transmittance in front of them, the smoke's colour stays
+        // over them, what lies behind it is hidden by the flames.
+        CHECK(merge.find("uniform sampler2D frontTex;") != std::string::npos);
+        CHECK(merge.find("light += (bw * keep * sv.a) * v.rgb;") != std::string::npos);
+        CHECK(merge.find("vec3 behind = max(cl - fl, vec3(0.0));") != std::string::npos);
+        CHECK(merge.find("lin = cl - behind * (1.0 - trans) + S * (tF * (1.0 - trans)) + flame;") != std::string::npos);
+        // never read back as (c - F) / tF: that blew up where tF is small
+        CHECK(merge.find("/ max(tF,") == std::string::npos);
+        // The flames' depth for the smoke in front of them.
+        const std::string cover = gl::FireFlameCoverDepthSource();
+        const bool coverOk = Compiles(cover, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(coverOk);
+        CHECK(cover.find("gl_FragDepth = 0.0;") != std::string::npos);
+        // dithered, so a flat smoke puff crossing the flames' depth never dims them up to a straight line
+        CHECK(cover.find("uniform vec4 flameCoverDither;") != std::string::npos);
+    }
+    // Into the linear target the flames write their weighted depth too, and
+    // read the scene's depth at half resolution (the farthest of four texels).
+    for (const bool flipbook : {true, false})
+    {
+        const std::string fs = gl::FireFlameFragmentSource(flipbook);
+        CHECK(fs.find("fragSurf = vec4(w * z * 0.001, w, 0.0, 1.0);") != std::string::npos);
+        CHECK(fs.find("if (flameOut.z > 1.5) {") != std::string::npos);
+    }
+    // Smoke after the flames is drawn again into their target at both draw
+    // sites (a no-op without flames).
+    {
+        const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
+        const std::string vb = ReadTextFile(Gl33Dir() / "EngineGL33_VertexBuffer.cpp");
+        CHECK(queue.find("if (FlameCoverWantedQueue() && BeginFireFlameCover())") != std::string::npos);
+        CHECK(vb.find("if (FlameCoverWanted() && BeginFireFlameCover())") != std::string::npos);
+        // Smoke over the flames (fix 02): the batched puffs too (the fire's
+        // smoke never covered its flames before), in both of the batch's ways.
+        const std::string batch = ReadTextFile(Gl33Dir() / "EngineGL33_DecalBatch.cpp");
+        size_t at = batch.find("if (FlameCoverWantedQueue() && BeginFireFlameCover())");
+        CHECK(at != std::string::npos);
+        CHECK(batch.find("if (FlameCoverWantedQueue() && BeginFireFlameCover())", at + 1) != std::string::npos);
+        // The smoke goes into its own target, laid over as in the frame, and
+        // keeps the product of its layers' 1 - alpha.
+        const std::string flames = ReadTextFile(Gl33Dir() / "EngineGL33_FireFlames.cpp");
+        CHECK(flames.find("fbo(f.coverFbo, f.frontTex, 0, f.coverDepthTex);") != std::string::npos);
+        CHECK(flames.find("Poseidon::render::blend::SmokeOverKeepTransmittance();") != std::string::npos);
+        const std::string blend =
+            ReadTextFile(Gl33Dir().parent_path() / "Poseidon" / "Graphics" / "Core" / "GLBlendState.hpp");
+        CHECK(
+            blend.find("glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);") !=
+            std::string::npos);
+    }
+    // The merge runs only in a frame that drew flames into the linear target
+    // (nothing is made before there are flames), once, before the first
+    // stage after the Air stage, and the stages after it read the merged frame.
+    {
+        const std::string draw = ReadTextFile(Gl33Dir() / "EngineGL33_FireFlames.cpp");
+        const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+        const std::string fog = ReadTextFile(Gl33Dir() / "EngineGL33_PostFog.cpp");
+        REQUIRE_FALSE(draw.empty());
+        const size_t flames =
+            draw.find("if (!Poseidon::firespread::GetFlames(view) || !view.sheets || view.count <= 0)");
+        REQUIRE(flames != std::string::npos);
+        CHECK(draw.find("EnsureFlameTargets(tw, th)") > flames);
+        CHECK(draw.find("EnsureFlipbook() && EnsureFlameProgram(true)") > flames);
+        const size_t merge = draw.find("void EngineGL33::MergeFireFlames(PostFrame& f)");
+        REQUIRE(merge != std::string::npos);
+        CHECK(draw.find("if (!FireFlamesPending() || fl.targetW != f.w || fl.targetH != f.h)", merge) !=
+              std::string::npos);
+        CHECK(post.find("if (i > static_cast<int>(rm::PostStage::Air) && !f.flameScene)") != std::string::npos);
+        // The camera's meter reads the frame without them (they take their
+        // own exposure; their light would pull the highlight guard).
+        const std::string camera = ReadTextFile(Gl33Dir() / "EngineGL33_Camera.cpp");
+        const size_t meter = camera.find("void EngineGL33::PostCameraMeter(const PostFrame& f)");
+        REQUIRE(meter != std::string::npos);
+        CHECK(camera.find("scene.flameScene = 0;", meter) != std::string::npos);
+        CHECK(camera.find("BindTex(0, PostSceneTex(scene));", meter) != std::string::npos);
+        // The draw sets the flames' exposure, the merge and the blend the clip.
+        CHECK(draw.find("glUniform4f(fp.locExpose, f.exposeLog2, 0.0f, 0.0f, 0.0f);") != std::string::npos);
+        CHECK(draw.find("SetFlameFilm(fl.mergeProg, f.camera, f.exposure, _lighting.camFlameKnee);", merge) !=
+              std::string::npos);
+        CHECK(draw.find("SetFlameFilm(fl.mergeProg, camera, 1.0f, _lighting.camFlameKnee);", merge) !=
+              std::string::npos);
+        CHECK(post.find("if (FireFlamesPending())") != std::string::npos);
+        CHECK(fog.find("if (f.flameScene)") != std::string::npos);
+    }
+    // Its own units sit past every unit the world programs use.
+    for (const auto& s : gl::kLitSamplers)
+    {
+        CAPTURE(s.name);
+        CHECK(s.unit != gl::kFlameBookUnit);
+        CHECK(s.unit != gl::kFlameDepthUnit);
+        CHECK(s.unit != gl::kFlameFarUnit);
+    }
+    CHECK(gl::kFlameBookUnit != gl::kFlameDepthUnit);
+    CHECK(gl::kFlameFarUnit != gl::kFlameBookUnit);
+    CHECK(gl::kFlameFarUnit != gl::kFlameDepthUnit);
+    CHECK(gl::kFlameBookUnit > 17);
+    CHECK(gl::kFlameDepthUnit > 17);
+    CHECK(gl::kFlameFarUnit > 17);
+}
+
+TEST_CASE("Fire spread: far flames keep their light (fix 08, the realism audit's C13)",
+          "[Graphics][Shaders][firespread]")
+{
+    // The far book's texel (FlameFarTexel) holds fields linear in what a
+    // tongue makes on screen, so its mips keep a far tongue's light: cold air
+    // is nothing; a hot texel is all zone, its luminance relative to 1650 K
+    // the shader's law (kFarRefCoreK, kFarRefSlopeK), its cover the zone's;
+    // soot counts only outside the zone.
+    float cold[4] = {}, hot[4] = {}, mid[4] = {};
+    gl::FlameFarTexel(0, 200, cold);
+    CHECK(cold[0] == 0.0f);
+    CHECK(cold[1] == 0.0f);
+    CHECK(cold[2] == 0.0f);
+    CHECK(cold[3] == Catch::Approx(200.0f / 255.0f));
+    gl::FlameFarTexel(255, 200, hot); // 1600 K: past the zone's top (1298 K)
+    CHECK(hot[0] == Catch::Approx(1.0f));
+    CHECK(hot[1] == Catch::Approx(std::exp(16500.0f * (1.0f / 1650.0f - 1.0f / 1600.0f))).epsilon(1e-4));
+    CHECK(hot[2] == Catch::Approx(1.0f));
+    CHECK(hot[3] == Catch::Approx(0.0f).margin(1e-6));
+    // Linear: a texel half cold, half hot averages to half of each, so the
+    // light the shader rebuilds from the mean (zone x black body at the
+    // luminance-equivalent kelvin) is the mean of the two lights, whereas the
+    // flipbook's own mip (the mean kelvin, 1100 K) under the zone's threshold
+    // has none.
+    gl::FlameFarTexel(128, 0, mid);
+    CHECK(mid[0] == 0.0f);
+    const float meanZone = 0.5f * (cold[0] + hot[0]), meanRel = 0.5f * (cold[1] + hot[1]);
+    const float kEff = 1.0f / (1.0f / 1650.0f - std::log(meanRel / meanZone) / 16500.0f);
+    CHECK(kEff == Catch::Approx(1600.0f).epsilon(1e-3));
+    CHECK(meanZone * std::exp(16500.0f * (1.0f / 1650.0f - 1.0f / kEff)) == Catch::Approx(meanRel).epsilon(1e-3));
+    // The shader carries the same law and reads the book on its own unit.
+    const std::string book = gl::FireFlameFragmentSource(true);
+    const std::string vs = gl::FireFlameVertexSource(true);
+    CHECK(book.find("const float kFarRefCoreK = 1650.0;") != std::string::npos);
+    CHECK(book.find("const float kFarRefSlopeK = 16500.0;") != std::string::npos);
+    CHECK(book.find("uniform sampler2DArray flameFar;") != std::string::npos);
+    CHECK(book.find("float k = 1.0 / (1.0 / kFarRefCoreK - log(rel) / kFarRefSlopeK);") != std::string::npos);
+    // Each tongue is near, far or a splat as a whole (the vertex shader's
+    // flat vFar), mixed between; far off it goes over to the far book before
+    // the near book's mip loses its core (from 1.5 to 2.5 mips down), and
+    // under 3 to 6 flame-target pixels it is a splat: a tent a pixel each way
+    // that sums to 1 over the pixel centres wherever it falls, times the
+    // ribbon's area, so a far flame never crawls or vanishes as it moves.
+    CHECK(vs.find("layout(location = 5) in vec4 aFar;") != std::string::npos);
+    CHECK(vs.find("const float kFarFromLod = 1.5;") != std::string::npos);
+    CHECK(vs.find("const float kFarToLod = 2.5;") != std::string::npos);
+    CHECK(vs.find("const float kSplatRadiusPx = 1.0;") != std::string::npos);
+    CHECK(vs.find("p = mix(p, pS, farState.x);") != std::string::npos);
+    CHECK(book.find("float w = (1.0 - abs(vSplat.x)) * (1.0 - abs(vSplat.y)) * vFar.w * seen;") != std::string::npos);
+    // A splat is hidden only where the scene stands in front of it (a low far
+    // flame's middle lies close in front of the ground behind it, and seen
+    // from above all of it does: a fade over a gap would hide it), and it
+    // carries the ribbon's area as shown (end on, the blob's).
+    CHECK(book.find("smoothstep(-max(kFlameSoftDepth, kSplatSoftShare * dist), 0.0,") != std::string::npos);
+    CHECK(vs.find("float shown = max(sinA, kSplatEndOnShare);") != std::string::npos);
+    CHECK(book.find("vec4 fb = flameFarRead(vec2(0.5), kSplatMeanLod);") != std::string::npos);
+    CHECK(book.find("const float kSplatMeanLod = 6.0;") != std::string::npos);
+    CHECK(book.find("light = mix(mix(lN, lF, farShare), lS, splat);") != std::string::npos);
+    // Fix 7's bed, flat on the ground, is a splat far off too (merge 08),
+    // carrying its mean light over its strip as shown; a far volume stays a
+    // ribbon on its way to its splat (fix 6's branch is gated).
+    CHECK(vs.find("float splat = 1.0 - smoothstep(kSplatFullPx, kSplatNonePx, sqrt(shownPx * widePx));") !=
+          std::string::npos);
+    CHECK(book.find("float epsS = emis * heat * kBedSplatBody;") != std::string::npos);
+    CHECK(book.find("const float kBedSplatBody = 0.18;") != std::string::npos);
+    // The level of detail's gain: the kept tongue carries the light and the
+    // optical depth of those it stands for, in both flames.
+    for (const bool flipbook : {true, false})
+    {
+        const std::string fs = gl::FireFlameFragmentSource(flipbook);
+        CHECK(fs.find("light *= vFar.x;") != std::string::npos);
+        CHECK(fs.find("trans = pow(clamp(trans, 0.0, 1.0), vFar.x);") != std::string::npos);
+    }
+}
+
+TEST_CASE("Fire spread: the burning bed fades out near the eye and has no straight end (follow-up 13)",
+          "[Graphics][Shaders][firespread]")
+{
+    // Close up the bed, a coarse stand-in for the fuel bed's flames, read as
+    // a smooth slab of light with a straight cut across its tip (night shot
+    // 15): it fades out from kBedNearFromSizes to kBedNearToSizes of its size
+    // (never past kBedNearFromMax and kBedNearToMax), further out than a
+    // tongue (kFlameNearFrom, kFlameNearTo), and its tip is rounded and
+    // ragged across it.
+    for (const bool flipbook : {true, false})
+    {
+        CAPTURE(flipbook);
+        const std::string fs = gl::FireFlameFragmentSource(flipbook);
+        if (fs.find("void flameBedMain()") == std::string::npos)
+            continue;
+        CHECK(fs.find("gFlameNearFrom = min(kBedNearFromSizes * max(len, w), kBedNearFromMax);") != std::string::npos);
+        CHECK(fs.find("gFlameNearTo = min(kBedNearToSizes * max(len, w), kBedNearToMax);") != std::string::npos);
+        CHECK(fs.find("sqrt(1.0 - smoothstep(kBedTipLo * tip, tip, u));") != std::string::npos);
+        CHECK(fs.find("kBedTipRagX * vSheet.x") != std::string::npos);
+    }
+    const float nearFromSizes = 3.0f, nearToSizes = 7.0f, nearFromMax = 10.0f, nearToMax = 22.0f;
+    const std::string book = gl::FireFlameFragmentSource(true);
+    CHECK(book.find("const float kBedNearFromSizes = 3.0;") != std::string::npos);
+    CHECK(book.find("const float kBedNearToSizes = 7.0;") != std::string::npos);
+    CHECK(book.find("const float kBedNearFromMax = 10.0;") != std::string::npos);
+    CHECK(book.find("const float kBedNearToMax = 22.0;") != std::string::npos);
+    // A head's bed (3 m long) is gone 9 m from the eye and whole from 21 m;
+    // a backing bed (0.4 m) shows whole from under 3 m.
+    CHECK(std::min(nearFromSizes * 3.0f, nearFromMax) == Catch::Approx(9.0f));
+    CHECK(std::min(nearToSizes * 3.0f, nearToMax) == Catch::Approx(21.0f));
+    CHECK(std::min(nearToSizes * 0.4f, nearToMax) < 3.0f);
+}
+
+TEST_CASE("Fire spread: big tongues are drawn as volumes, never squashed end on (fix 6)",
+          "[Graphics][Shaders][firespread]")
+{
+    const std::string vs = gl::FireFlameVertexSource(true);
+    const std::string book = gl::FireFlameFragmentSource(true);
+    // A fifth instanced vec4 says whether a tongue is a volume (its visible
+    // absorption; 0 a ribbon), and the backend fills it from the sheet.
+    CHECK(vs.find("layout(location = 4) in vec4 aVolume;") != std::string::npos);
+    const std::string draw = ReadTextFile(Gl33Dir() / "EngineGL33_FireFlames.cpp");
+    CHECK(draw.find("constexpr int kFlameInstanceAttribs = 5;") != std::string::npos);
+    CHECK(draw.find("o[16] = s.volumeK;") != std::string::npos);
+    // A volume's quad faces the eye from any side (no ribbon, no end-on
+    // squash: those stay for the small tongues), and its fragment integrates
+    // the flipbook along the sight line through a round body, front to back.
+    // (fix 08: a far one, on its way to a splat, stays a ribbon.)
+    CHECK(vs.find("if (aVolume.x > 0.0 && farState.x <= 0.0) {") != std::string::npos);
+    CHECK(vs.find("p = flameVolumeQuad(t, side, halfW, tip, height, span - kFlameSink);") != std::string::npos);
+    CHECK(book.find("if (vVolLat.w > 0.0) {") != std::string::npos);
+    CHECK(book.find("void flameVolume(float footM) {") != std::string::npos);
+    CHECK(book.find("for (int i = 0; i < steps; ++i) {") != std::string::npos);
+    CHECK(book.find("const int kVolSteps = 16;") != std::string::npos);
+    CHECK(book.find("trans *= (1.0 - aHide) * sootT;") != std::string::npos);
+    // Its samples behind the scene drop out one by one, and the depth target
+    // takes the depth of those that show (not the quad's).
+    CHECK(book.find("smoothstep(0.0, softM, sceneZ - zv)") != std::string::npos);
+    CHECK(book.find("if (gFlameViewZ >= 0.0) z = gFlameViewZ;") != std::string::npos);
+    // A sooty tongue's tips hide more than they glow: dark into smoke, not salmon over the sky.
+    CHECK(book.find("float occPow = mix(occBody, kVolTipOccPow, tip);") != std::string::npos);
+    CHECK(book.find("pow(zone * ends, occPow) * maskHide") != std::string::npos);
+    CHECK(book.find("float occBody = mix(kVolBodyOccPow, kVolSootyOccPow, sooty);") != std::string::npos);
+    CHECK(book.find("const float kVolBodyOccPow = 1.0;") != std::string::npos);
+    CHECK(book.find("const float kVolTipOccPow = 0.35;") != std::string::npos);
+    // The march does not morph (the owner's fault with the first build: the
+    // body's surface and outline changing in place). It runs only through the
+    // slab that holds the body's depth, in steps short across the depth and
+    // along the axis, and each step takes the depth mask's mean over its own
+    // reach (its integral), never the mask at one point: the picture does not
+    // depend on where the samples fall, and a thin part between two samples
+    // is never missed.
+    CHECK(book.find("float ya = tc + (-depthMax - yc) / dy, yb = tc + (depthMax - yc) / dy;") != std::string::npos);
+    // The puff never scales the body (the owner: "the fire still weirdly
+    // expands and retracts"): it is a bulge climbing it, read from the
+    // instance's fourth number, with the foot left alone.
+    CHECK(vs.find("clamp(aVolume.z, 0.0, 1.0), max(aVolume.w, 0.0));") != std::string::npos);
+    CHECK(draw.find("Poseidon::firespread::VolumePuffCode(s.volumePuff, s.volumeWaveM, s.volumeBulge)") !=
+          std::string::npos);
+    CHECK(book.find("float girth = 1.0 + bulgeAmp * bulge;") != std::string::npos);
+    CHECK(book.find("smoothstep(0.0, kVolBulgeFoot * len, s)") != std::string::npos);
+    CHECK(book.find("vec2 uv = vec2(0.5 + 0.5 * flip * x / (halfW * girth), s / frameH);") != std::string::npos);
+    CHECK(book.find(
+              "float stepT = min(kVolStepY * depth0 / max(abs(dy), 1e-3), kVolStepS * halfW / max(abs(b), 1e-3));") !=
+          std::string::npos);
+    CHECK(book.find("float flameVolMaskInt(float u, float p) {") != std::string::npos);
+    CHECK(book.find("float mask = (flameVolMaskInt(yu + hu, 1.0) - flameVolMaskInt(yu - hu, 1.0)) / (2.0 * hu);") !=
+          std::string::npos);
+    CHECK(book.find("smoothstep(kVolMaskFrom, 1.0, abs(y)") == std::string::npos);
+    CHECK(book.find("kVolStepShare") == std::string::npos);
+    // The procedural fallback reads the same varyings (and never a volume).
+    const std::string procedural = gl::FireFlameFragmentSource(false);
+    CHECK(procedural.find("flat in vec4 vVolLat;") != std::string::npos);
+    CHECK(procedural.find("flameVolume") == std::string::npos);
 }
 
 TEST_CASE("Remaster sky table: with its blends at zero every draw is the one before it",
@@ -2178,4 +2850,45 @@ TEST_CASE("Remaster lighting: a keyless night reads the terrain's sky half as th
     CHECK(shade.find("bool keyLit = any(notEqual(litSun.rgb, vec3(0.0))) || (litFlags.z > 0.5 && litFlags.z < 1.5);") !=
           std::string::npos);
     CHECK(shade.find("terrainSkyVisibility(posAbs, skyVisibility);") != std::string::npos);
+}
+
+TEST_CASE("Fire spread: the sparks' shaders compile, only add light and draw with the flames",
+          "[Graphics][Shaders][firespread]")
+{
+    GlslangInit init;
+    const std::string vs = gl::FireSparkVertexSource();
+    const std::string fs = gl::FireSparkFragmentSource();
+    std::string log;
+    const bool vsOk = Compiles(vs, EShLangVertex, log);
+    CAPTURE(log);
+    CHECK(vsOk);
+    const bool fsOk = Compiles(fs, EShLangFragment, log);
+    CAPTURE(log);
+    CHECK(fsOk);
+    // The varyings the vertex shader writes are the ones the fragment reads
+    // (the streak's place is noperspective: the quad is built on screen).
+    CHECK(Varyings(vs, "out") == Varyings(fs, "in"));
+    CHECK(vs.find("noperspective out vec2 vLocal;") != std::string::npos);
+    CHECK(CountOf(fs, gl::LitConstantsBlock()) == 1);
+    CHECK(fs.find(gl::kCameraCodecGLSL) != std::string::npos);
+    // A spark only adds light: into the linear target with a transmittance of
+    // 1 (nothing behind it hidden, so never a dark dot against the sky) and
+    // its weighted depth as a flame's; into the frame added with an alpha of 0.
+    CHECK(fs.find("fragColor = vec4(light, 1.0);") != std::string::npos);
+    CHECK(fs.find("fragColor = vec4(code, 0.0);") != std::string::npos);
+    CHECK(fs.find("fragSurf = vec4(w * z * 0.001, w, 0.0, 1.0);") != std::string::npos);
+    // Its light is its body's over the streak's Gaussian integral (kept as it
+    // shrinks under a pixel or smears).
+    CHECK(vs.find("float integral = len * 2.50662827 * sigma + 6.28318531 * sigma * sigma;") != std::string::npos);
+    // The flame pass draws them right after the tongues, into the same
+    // target, and frees them with its own.
+    const std::string flames = ReadTextFile(Gl33Dir() / "EngineGL33_FireFlames.cpp");
+    const size_t tongues = flames.find("glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, kFlameStripVertices, count);");
+    const size_t sparks = flames.find("DrawFireSparks(hdr, soft, proj, hdr ? FlameScale() : 1);");
+    REQUIRE(tongues != std::string::npos);
+    REQUIRE(sparks != std::string::npos);
+    CHECK(sparks > tongues);
+    CHECK(flames.find("DeinitFireSparks();") != std::string::npos);
+    const std::string draw = ReadTextFile(Gl33Dir() / "EngineGL33_FireSparks.cpp");
+    CHECK(draw.find("glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, count);") != std::string::npos);
 }

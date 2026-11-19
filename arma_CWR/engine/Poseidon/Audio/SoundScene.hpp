@@ -59,7 +59,11 @@ class SoundScene
 	~SoundScene();
 	
 	IWave *Open( const char *filename, bool is3D=true, bool accom=true );
-	IWave *OpenAndPlay
+    // As Open, from a file's bytes in memory (ext ".ogg" or ".wav"): sounds
+    // that live beside the executable, not in the game's banks (the fire
+    // spread's, World/Simulation/FireSpreadWorld.cpp). Null without sound.
+    IWave* OpenMemory(const void* data, size_t size, const char* ext, bool is3D = true, bool accom = true);
+    IWave *OpenAndPlay
 	(
 		const char *filename, Vector3Par pos, Vector3Par speed,
 		float volume=1.0, float frequency=1.0

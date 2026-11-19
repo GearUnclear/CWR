@@ -246,6 +246,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	bool _canSmoke:1; // object may smoke when destructed
 	bool _isDestroyed:1; // object is already destructed
 	bool _static:1; // object is static (never changing position)
+	// (end-state agent, FireShell.hpp) gutted by the fire: its shape is its
+	// shell's, the stock crumple never runs on it; set on every machine by the
+	// fire's replicated damage (GutByFire) and kept in a savegame
+	bool _gutted:1;
 
 	SRef<DammageRegions> _dammage; // dammage information
 
@@ -596,6 +600,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// Check if object geometry should be used for collision testing
 	virtual bool HasGeometry() const;
 	bool IsDestroyed() const {return _isDestroyed;}
+	// (end-state agent) gutted by the fire (FireShell.hpp)
+	bool IsGutted() const {return _gutted;}
+	// The fire guts it: the replicated damage path (every machine sets
+	// _gutted and takes the shell; FireShell.hpp kShellAmmo).
+	void GutByFire();
 	// Check if object is passable by men.
 	virtual bool IsPassable() const;
 

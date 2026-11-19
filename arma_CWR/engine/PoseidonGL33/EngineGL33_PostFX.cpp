@@ -607,7 +607,17 @@ void EngineGL33::EndWorldScene()
     in.fog = _fog.on && _fog.mediumFrame == GetFrameCounter();
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
-        return; // nothing to add: leave the frame as drawn
+    {
+        // Nothing to add: leave the frame as drawn, but for the fire
+        // spread's flames, if this frame drew them into their linear target.
+        if (FireFlamesPending())
+        {
+            BeginPostFullscreen();
+            BlendFireFlamesIntoFrame(in.camera);
+            EndPostFullscreen();
+        }
+        return;
+    }
     // Surface light: the shares the world wrote replace the frame alpha's,
     // and the Ao stage runs the horizon occlusion (when it runs at all).
     f.surfaces = surfReady;
@@ -641,11 +651,19 @@ void EngineGL33::EndWorldScene()
         const auto stage = static_cast<rm::PostStage>(i);
         if (!f.plan.Runs(stage))
             continue;
+        // The fire spread's flames (their linear target, when this frame drew
+        // them) merge into the frame after the fog and the air, before the
+        // glow stages and the camera (a no-op without them).
+        if (i > static_cast<int>(rm::PostStage::Air) && !f.flameScene)
+            MergeFireFlames(f);
         RunPostStage(stage, f);
         GpuMark(rm::GetPostStageInfo(stage).endMark);
         if (stage == rm::PostStage::Resolve)
             BeginPostFullscreen();
     }
+    // Flames this frame drew that no stage after the Air stage took in.
+    if (FireFlamesPending())
+        BlendFireFlamesIntoFrame(f.camera);
     GpuMark(Poseidon::gpu::Mark::PostEnd);
     EndPostFullscreen();
     // The linear depth the next frame's combat shadow mask traces through,

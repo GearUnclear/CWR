@@ -1430,6 +1430,14 @@ void LODShape::InitCC(Ref<ConvexComponents>& cc, Shape* shape)
     }
 }
 
+void LODShape::RebuildConvexComponents()
+{
+    _geomComponents = new ConvexComponents();
+    _viewComponents = new ConvexComponents();
+    _fireComponents = new ConvexComponents();
+    InitConvexComponents();
+}
+
 void LODShape::InitConvexComponents()
 {
     Shape* geom = GeometryLevel();

@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
@@ -142,6 +143,13 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         {
             glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
             ++Poseidon::gPerfDrawCalls;
+            // Smoke in front of the fire spread's flames dims them too (a
+            // no-op unless this frame drew flames into their linear target).
+            if (FlameCoverWantedQueue() && BeginFireFlameCover()) // smoke over the flames (fix 02)
+            {
+                glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+                EndFireFlameCover();
+            }
         }
 
         // Record DrawItem, only on frames the frame validator observes (S3-28)
@@ -271,9 +279,9 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     // just assembles the BuildContext, calls the translation, and binds the
     // result.  The descriptor is the single seam that decodes spec bits.
     Poseidon::render::BuildContext ctx;
-    ctx.isIn3DPass = vertexInput == PipelineVertexInput::Mesh
-                   ? true
-                   : vertexInput == PipelineVertexInput::Screen ? false : IsIn3DPass();
+    ctx.isIn3DPass = vertexInput == PipelineVertexInput::Mesh     ? true
+                     : vertexInput == PipelineVertexInput::Screen ? false
+                                                                  : IsIn3DPass();
     ctx.isMultitexturing = IsMultitexturing();
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
@@ -319,9 +327,12 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     // Surface light: the section's surface class (its texture, the drawn
     // object's kind) for the specular every lit surface gets, on the program
     // ApplyPipeline bound. Only the object program reads it, and not for
-    // leaves (a forced diffuse): the land, grass, sea and crowns skip it.
+    // leaves (a forced diffuse): the land, grass, sea and crowns skip it,
+    // except while the fire spread's char is on (_burnDraws), whose leaves
+    // read their char class from it.
     if (vertexInput == PipelineVertexInput::Mesh && d.shader == Poseidon::render::ShaderFamily::Normal &&
-        _materialSet.forcedDiffuse.R() + _materialSet.forcedDiffuse.G() + _materialSet.forcedDiffuse.B() <= 0.0f)
+        (_materialSet.forcedDiffuse.R() + _materialSet.forcedDiffuse.G() + _materialSet.forcedDiffuse.B() <= 0.0f ||
+         _burnDraws))
         ApplySurfaceClass(tex, d);
 }
 
@@ -398,30 +409,54 @@ void EngineGL33::BeginPass(PassId passId)
     if (GScene)
     {
         _frameState = BuildFrameState(GScene->GetCamera(), GScene->MainLight(), _bias, _fogColor, _sunEnabled);
+        // ---- (smoketrim) Back from the world's own screen-space draws ----
+        // A smoke puff (Object::DrawDecal) draws in the screen pass, so the
+        // next translucent 3D draw in the far-to-near order came back here
+        // through the whole set-up below, the frame's remastered lighting
+        // (UploadLitFrameConstants) included: about half a millisecond of CPU
+        // each time. A burning village's smoke columns alternate with its
+        // burning fences and its houses' glass some twenty times a frame: 6 to
+        // 9 ms of CPU, and the GPU frame starved by as much. Within one
+        // frame's world pass with the same frame state nothing that set-up
+        // writes has changed (the screen pass changes only its viewport scale,
+        // SlotVpScale, and each draw sets its own pass state): the frame
+        // constants go up again and the jitter and surface mask are put back
+        // below, the rest is kept.
+        const bool worldOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
+        const bool keepSetup = Poseidon::firespread::KeepWorldPassSetup() && worldOn && _worldEffectsOn &&
+                               _worldPassOpen && _passInitFrame == GetFrameCounter() &&
+                               _remasterPrograms == (_lightingActive && worldOn) &&
+                               SameFrameState(_frameState, _passInitState);
+        _passInitState = _frameState;
+        _passInitFrame = GetFrameCounter();
+        // ---- end back from the screen pass ----
         _drawItems.clear();
         _currentDrawItem = DrawItem{};
 
         UploadFrameConstants(_frameState);
-        // Remastered lighting: the world's 3D passes (not a portrait capture, a
-        // 3D preview drawn in a dialog after the world, or the night-vision
-        // intensifier) draw through the remastered programs, get the terrain
-        // and cloud lookups and end in the post pass.
-        _worldEffectsOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
-        if (_worldEffectsOn && !_worldPassOpen)
-            GpuMark(Poseidon::gpu::Mark::WorldBegin);
-        if (_worldEffectsOn)
+        if (!keepSetup)
         {
-            _worldPassOpen = true;
-            // The world's fog for the reflections' trace (PostSsr): from here on
-            // the frame state's fog flag follows each draw.
-            _ssrWorldFog[0] = _frameState.fogParams[0];
-            _ssrWorldFog[1] = _frameState.fogParams[1];
+            // Remastered lighting: the world's 3D passes (not a portrait capture, a
+            // 3D preview drawn in a dialog after the world, or the night-vision
+            // intensifier) draw through the remastered programs, get the terrain
+            // and cloud lookups and end in the post pass.
+            _worldEffectsOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
+            if (_worldEffectsOn && !_worldPassOpen)
+                GpuMark(Poseidon::gpu::Mark::WorldBegin);
+            if (_worldEffectsOn)
+            {
+                _worldPassOpen = true;
+                // The world's fog for the reflections' trace (PostSsr): from here on
+                // the frame state's fog flag follows each draw.
+                _ssrWorldFog[0] = _frameState.fogParams[0];
+                _ssrWorldFog[1] = _frameState.fogParams[1];
+            }
+            UpdateRemasterPrograms();
+            // Bind the (previous frame's) shadow depth map + light-VP for the lit
+            // shaders.  No-op until a depth pass has run with shadow maps enabled.
+            UpdateShadowMapLitState();
+            UploadLitFrameConstants();
         }
-        UpdateRemasterPrograms();
-        // Bind the (previous frame's) shadow depth map + light-VP for the lit
-        // shaders.  No-op until a depth pass has run with shadow maps enabled.
-        UpdateShadowMapLitState();
-        UploadLitFrameConstants();
         // The TAA jitter and texture LOD bias of this pass (the frame gates are
         // known now); zero for any pass that is not a TAA frame's world pass.
         ApplyTaaJitter();

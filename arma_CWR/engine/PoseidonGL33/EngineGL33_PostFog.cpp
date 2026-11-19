@@ -640,7 +640,11 @@ void EngineGL33::SnapshotWorldBeforeOverlay()
 
 unsigned int EngineGL33::PostSceneTex(const PostFrame& f) const
 {
-    // The frame with the fog or the air pass applied when the Air stage ran.
+    // The frame with the fire spread's flames merged in (MergeFireFlames,
+    // after the Air stage), else with the fog or the air pass applied when
+    // the Air stage ran.
+    if (f.flameScene)
+        return f.flameScene;
     if (!f.plan.Runs(rm::PostStage::Air))
         return f.frameColor;
     if (!f.plan.fog)

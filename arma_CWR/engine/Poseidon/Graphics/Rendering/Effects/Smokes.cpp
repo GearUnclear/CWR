@@ -18,6 +18,10 @@
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
+#include <Poseidon/World/Simulation/FirePlume.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <algorithm>
 
 using namespace Poseidon;
 namespace Poseidon
@@ -88,7 +92,7 @@ bool SmokeSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT, Simul
     {
         return true;
     }
-    if (EnableVisualEffects(pos, prec))
+    if (!_quiet && EnableVisualEffects(pos, prec))
     {
         _nextTime -= deltaT;
         while (_nextTime <= 0)
@@ -273,10 +277,14 @@ void SmokeSourceVehicle::SimulateExplosion()
         // Detonation) from the fuel that burns in it, whether or not the blast
         // is big enough to damage (the gate below, unchanged). A jeep's tank
         // (explosives about 5, so hit about 3) made no fireball at all.
-        const float fuelKg = lighting::kFuelKgPerHit * type.hit;
+        // (fire-objects) With the fire lane on, its fuel by its class (a car's
+        // 5 to 10 kg, a tanker's 500 to 1000: the consult's tenth answer);
+        // off, the stock's.
+        const float fuelKg = firespread::WreckFireballFuelKg(GetObject(), lighting::kFuelKgPerHit * type.hit);
         if (fuelKg >= lighting::kMinFuelKg)
         {
-            const lighting::Detonation d = lighting::DeflagrationFromFuel(fuelKg);
+            const lighting::Detonation d =
+                lighting::DeflagrationFromFuel(fuelKg, firespread::WreckFireballMaxKg(GetObject()));
             _deflagration = d;
             _deflagrating = true;
             _deflagrationAge = 0.0f;
@@ -301,6 +309,15 @@ void SmokeSourceVehicle::SimulateExplosion()
             // The wreck burns and smokes on (as the damaging blast's does).
             const float burnOn = GFxRandGen.RandomValue() * 0.4f + 0.8f;
             SetSourceTimes(0, 40 * burnOn, 40 * burnOn);
+        }
+        // (fire-objects) With the fire lane on the wreck burns on as the
+        // fire's own (its fireball reaching the ground first): the stock's
+        // smoke and ember light stop, and its blast's ExplosionDammage below
+        // is the wreck's (NotifyExplosion leaves it to the wreck's fire).
+        if (GlowsAsWreck() && firespread::NotifyWreck(GetObject(), _deflagrating ? _deflagration.radius : 0.0f))
+        {
+            _objectFire = true;
+            SetQuiet(true);
         }
         if (type.hit > 50)
         {
@@ -333,7 +350,9 @@ void SmokeSourceVehicle::SimulateExplosion()
             PoseidonAssert(_owner);
             if (IsLocal())
             {
+                firespread::SetWreckBlast(_objectFire);
                 GLOB_LAND->ExplosionDammage(_owner, nullptr, GetObject(), Position(), VUp, &type);
+                firespread::SetWreckBlast(false);
             }
         }
     }
@@ -396,12 +415,15 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
         else
             lighting::GCombatLights().Spawn(lighting::CombatLightKind::Explosion, p, _fire.GetSize());
     }
-    const float glow = canDelete || !GlowsAsWreck() ? 0.0f : _inOutDensity * _density;
+    // (fire-objects: a wreck the fire lane burns on glows and lights by its fire's own)
+    const float glow = canDelete || !GlowsAsWreck() || _objectFire ? 0.0f : _inOutDensity * _density;
     if (glow > 0.01f && prec <= SimulateInvisibleNear)
     {
         const Vector3 at = Position() + VUp * 1.5f;
         const float p[3] = {at.X(), at.Y(), at.Z()};
         _combatEmbers.Set(lighting::CombatLightKind::Fire, p, 0.9f * glow * _size);
+        // A burning wreck can light the grass round it (FIRE-SPREAD; no-op when off).
+        firespread::NotifyBurning(Position(), deltaT, glow);
     }
     else
     {
@@ -908,6 +930,274 @@ void Cloudlet::SetTemperature(float t, float dt, CloudletTTable* table)
     _t = t;
     _dt = dt;
     _cloudletTTable = table;
+}
+
+// ---- A fire plume's puff (Smokes.hpp PlumePuff; FirePlume.hpp the law) ----
+
+DEFINE_FAST_ALLOCATOR(PlumePuff)
+
+namespace
+{
+// The wind at a height over the ground as a share of the 10 m wind: a log
+// profile over grass (roughness kPlumeZ0), within kPlumeWindLow..Top. Smoke
+// near the ground moves at about 0.7 of it, the plume aloft at 1.1 to 1.25
+// (consult eighth 3; the checklist 1.5: 8 to 11 m/s in an 11 m/s wind).
+constexpr float kPlumeZ0 = 0.05f, kPlumeWindLow = 0.55f, kPlumeWindTop = 1.25f;
+float PlumeWindShareAt(float agl)
+{
+    const float z = std::clamp(agl, 1.0f, 1000.0f);
+    return std::clamp(std::log(z / kPlumeZ0) / std::log(10.0f / kPlumeZ0), kPlumeWindLow, kPlumeWindTop);
+}
+// A puff fades in over its first kPuffInSec while it grows out of the flames
+// from kPuffBornShare of its size over kPuffGrowInSec; it fades out as it
+// comes within kPuffEyeFar of its size of the camera's plane, past the plane
+// at which a decal is dropped (Object::DrawDecal: kPuffDecalCutNear near
+// planes; gone at kPuffEyeNear of its size past it: the eye is in it, its
+// smoke shown by those round it), past kPlumeFarM downwind (the clear
+// plume ends about 5 km out, kPlumeEndM the last of it) and over the last
+// kPuffOutSec of its life. Low on the ground near its source its middle
+// stands kPuffHugLift of its size up, so it lies on the ground, not in it.
+constexpr float kPuffInSec = 1.5f, kPuffOutSec = 20.0f;
+constexpr float kPuffBornShare = 0.6f, kPuffGrowInSec = 2.0f;
+constexpr float kPuffEyeNear = 0.15f, kPuffEyeFar = 0.5f;
+constexpr float kPuffDecalCutNear = 10.0f;
+constexpr float kPlumeFarM = 5000.0f, kPlumeEndM = 6500.0f;
+constexpr float kPuffHugLift = 0.2f, kPuffGroundClear = 0.2f, kPuffHugLow = 2.5f;
+// The smoke follows the land for its first kPlumeFollowM (it hugs it), and
+// runs at its height over its source's ground from kPlumeLevelFromM (the land
+// falling away under it, or rising into it: then it keeps clear of it).
+constexpr float kPlumeFollowM = 150.0f, kPlumeLevelFromM = 600.0f;
+// The plume's slow wander: a quarter of its spread sideways, an eighth of its
+// thickness up and down.
+constexpr float kPlumeWanderSide = 0.25f, kPlumeWanderUp = 0.12f;
+// A dying puff fades over this band of the survival round its draw.
+constexpr float kPuffDieBand = 0.25f;
+// The flames' light on it is looked up every kPuffFireSec and eased over
+// kPuffFireEaseSec; none is looked for over kPuffFireTopM.
+constexpr float kPuffFireSec = 0.25f, kPuffFireEaseSec = 0.6f, kPuffFireTopM = 150.0f;
+// The light it takes: the sun through the plume over it (a share
+// kPlumeSunPath of the plume's optical depth from above over the share of its
+// thickness over the puff, slanted by the sun's height, at least
+// kPlumeSunSinMin; plus half its own), and the sky less the plume's own shade
+// inside it (up to kPlumeSkyShade in its middle).
+constexpr float kPlumeSunPath = 0.5f, kPlumeSunSinMin = 0.15f, kPlumeSkyShade = 0.35f;
+// At night a plume away from its flames is dark against the sky (the
+// checklist 2.9): the night sky's and the moon's light on it falls to
+// kPlumeNightSky of the day's share as the sun goes from kPlumeDuskDeg to
+// kPlumeNightDeg under the horizon.
+constexpr float kPlumeNightSky = 0.06f, kPlumeDuskDeg = -2.0f, kPlumeNightDeg = -10.0f;
+} // namespace
+
+namespace
+{
+int s_plumePuffs = 0; // live PlumePuffs (the simulation's thread only)
+} // namespace
+
+PlumePuff::PlumePuff(LODShapeWithShadow* shape, const PlumePuffSpec& spec)
+    : Cloudlet(shape, 3.0f, spec.lifeSec), _spec(spec)
+{
+    ++s_plumePuffs;
+    // Its own alpha and colour (Place): the base's fades are not used.
+    SetFades(0.0f, 0.0f);
+    SetAlpha(1.0f);
+    _fireTimer = kPuffFireSec * std::clamp(spec.draw, 0.0f, 1.0f); // staggered
+    Place(0.0f);
+}
+
+PlumePuff::~PlumePuff()
+{
+    --s_plumePuffs;
+}
+
+int PlumePuff::Alive()
+{
+    return s_plumePuffs;
+}
+
+void PlumePuff::Simulate(float deltaT, SimulationImportance prec)
+{
+    _animation += deltaT * _animationSpeed;
+    while (_animation >= 1.0f)
+        _animation -= 1.0f;
+    if (deltaT > 0.0f)
+    {
+        _age += deltaT;
+        // Carried by the wind at its own height (the fire's wind: it turns,
+        // the puff turns with it; its sideways axis stays the one it left on).
+        float wx = 0.0f, wz = 0.0f;
+        firespread::PlumeWind(wx, wz);
+        const float w = std::sqrt(wx * wx + wz * wz);
+        const float u = w * PlumeWindShareAt(_agl);
+        if (w > 1e-3f)
+        {
+            _travelX += wx / w * u * deltaT;
+            _travelZ += wz / w * u * deltaT;
+        }
+        _x += u * deltaT;
+    }
+    Place(deltaT);
+}
+
+void PlumePuff::Place(float dt)
+{
+    using namespace firespread;
+    PlumeLaw law;
+    law.riseK = _spec.riseK;
+    law.finalX = _spec.finalX;
+    law.baseM = _spec.baseM;
+    law.hugM = _spec.hugM;
+    const float x = _x;
+    const PlumePoint at = PlumeAt(law, x, _spec.bornM, _spec.perMetre, _spec.mass, _spec.opticK, _spec.overlap);
+    const float top = at.top, bottom = at.bottom;
+    const float thick = std::max(top - bottom, 0.5f);
+    const float spread = at.spread;
+    const float size = at.size * (kPuffBornShare + (1.0f - kPuffBornShare) * PlumeSmooth(0.0f, kPuffGrowInSec, _age));
+    // Across the plume: its own place, and the plume's wander when it left.
+    const float side = (_spec.lateral + kPlumeWanderSide * _spec.meanderSide) * spread;
+    _side = side;
+    const float px = _spec.source.X() + _travelX - _spec.windZ * side;
+    const float pz = _spec.source.Z() + _travelZ + _spec.windX * side;
+    const float ground = GLandscape ? GLandscape->SurfaceY(px, pz) : _spec.source.Y();
+    // Up: over the land near its source, level with its source's ground far out.
+    const float level = PlumeSmooth(kPlumeFollowM, kPlumeLevelFromM, x);
+    const float base = ground + (_spec.source.Y() - ground) * level;
+    // While the plume hugs the ground most of its smoke is low (the eye just
+    // downwind of a head stands in it): its place up through the plume is
+    // raised to a power that falls from 1 + kPuffHugLow to 1 over the hug.
+    const float hugLow = law.hugM > 0.0f ? kPuffHugLow * (1.0f - PlumeSmooth(0.0f, law.hugM, x)) : 0.0f;
+    const float up = std::pow(std::clamp(_spec.vertical, 0.0f, 1.0f), 1.0f + hugLow);
+    const float h = bottom + up * thick + kPlumeWanderUp * _spec.meanderUp * thick;
+    const float lift = law.hugM > 0.0f ? kPuffHugLift * size * (1.0f - PlumeSmooth(0.0f, law.hugM, x)) : 0.0f;
+    const float y = std::max(base + h + lift, ground + kPuffGroundClear * size);
+    _agl = y - ground;
+    SetPosition(Vector3(px, y, pz));
+    SetOrientScaleOnly(size);
+    // Its place in the plume's cross-section (an ellipse as wide as the fire
+    // plus the spread, as thick as the plume) and the smoke's density there:
+    // its shade from the sun and the sky (PlumeLight).
+    _semiAcross = std::max(0.5f * _spec.widthM + spread, 1.0f);
+    _semiUp = std::max(0.5f * thick, 1.0f);
+    _offAcross = _spec.acrossM + side;
+    _offUp = h - 0.5f * (top + bottom);
+    _plumeTopTau = _spec.opticK * _spec.load / (2.0f * _semiAcross);
+    _density = _plumeTopTau / (2.0f * _semiUp);
+
+    // How much of it lives on (FirePlume.hpp PlumeSurvival), and its smoke.
+    const float live = at.survival;
+    const float keep = std::clamp((live - _spec.draw) / kPuffDieBand + 0.5f, 0.0f, 1.0f);
+    if ((keep <= 0.0f && live < _spec.draw) || x >= kPlumeEndM || _age >= _spec.lifeSec)
+    {
+        _opacity = 0.0f;
+        _invisible = true;
+        _delete = true;
+        _constantColor = PackedColorRGB(_constantColor, 0);
+        return;
+    }
+    _tau = at.tau;
+    float a = std::min(1.0f - std::exp(-_tau), kPuffAlphaMax) * keep;
+    a *= PlumeSmooth(0.0f, kPuffInSec, _age);
+    a *= 1.0f - PlumeSmooth(kPlumeFarM, kPlumeEndM, x);
+    a *= 1.0f - PlumeSmooth(_spec.lifeSec - kPuffOutSec, _spec.lifeSec, _age);
+    _bodyOpacity = std::clamp(a, 0.0f, 1.0f);
+    // ---- No steps round the eye (fix 02 follow-up) ----
+    // By its depth along the view, not its distance: a decal is dropped once
+    // its middle is within kPuffDecalCutNear near planes of the camera
+    // (Object::DrawDecal), and a big puff passing beside the eye filled the
+    // screen just before (its distance still large, its alpha up): the whole
+    // frame stepped by up to a quarter in one frame when it went (or came, a
+    // puff overtaking the camera). Now it has faded out before then.
+    if (GScene && GScene->GetCamera())
+    {
+        const Camera& cam = *GScene->GetCamera();
+        Vector3 view = cam.Direction();
+        const float len = view.Size();
+        const float depth = len > 1e-6f ? (Vector3(px, y, pz) - cam.Position()).DotProduct(view) / len : 0.0f;
+        const float cut = kPuffDecalCutNear * cam.Near();
+        a *= PlumeSmooth(cut + kPuffEyeNear * size, cut + kPuffEyeFar * size, depth);
+    }
+    // ---- end no steps round the eye ----
+    _opacity = std::clamp(a, 0.0f, 1.0f);
+
+    // Its colour: its fuel's smoke, paling with the distance it has come.
+    const PlumeRgb c = PlumeAlbedo(_spec.woody, x, _spec.black);
+    _constantColor = PackedColor(Color(c.r, c.g, c.b, _opacity));
+
+    // The flames' light on its underside (dusk and night), looked up now and
+    // then and eased, so it never steps.
+    _fireTimer -= dt;
+    if (!_fireValid || _fireTimer <= 0.0f)
+    {
+        _fireTimer = std::max(_fireTimer + kPuffFireSec, 0.5f * kPuffFireSec);
+        float rgb[3] = {0.0f, 0.0f, 0.0f};
+        if (_agl < kPuffFireTopM)
+            PlumeFireLight(Vector3(px, y, pz), rgb);
+        for (int i = 0; i < 3; ++i)
+        {
+            _fireTarget[i] = rgb[i];
+            if (!_fireValid)
+                _fire[i] = rgb[i];
+        }
+        _fireValid = true;
+    }
+    const float ease = dt > 0.0f ? 1.0f - std::exp(-dt / kPuffFireEaseSec) : 0.0f;
+    for (int i = 0; i < 3; ++i)
+        _fire[i] += (_fireTarget[i] - _fire[i]) * ease;
+}
+
+void PlumePuff::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
+{
+    // An unseen puff (fading in or out, or round the eye) costs no fill.
+    if (_opacity * 255.0f < 1.0f)
+        return;
+    base::Draw(level, clipFlags, frame);
+}
+
+bool PlumePuff::PlumeLight(float gain[3], float fire[3]) const
+{
+    using namespace firespread;
+    float sunShare = 0.0f, cosView = 0.0f, night = 1.0f, glowNight = 1.0f;
+    float sunAcross = 0.0f, sunUp = 1.0f;
+    if (GScene && GScene->MainLight() && GScene->GetCamera())
+    {
+        const Vector3 toSun = -GScene->MainLight()->SunDirection();
+        const float sinSun = std::clamp(toSun.Y(), -1.0f, 1.0f);
+        const float elev = std::asin(sinSun) * 57.29578f;
+        sunShare = PlumeSunShare(elev);
+        glowNight = PlumeGlowNight(elev);
+        night = 1.0f - (1.0f - kPlumeNightSky) * (1.0f - PlumeSmooth(kPlumeNightDeg, kPlumeDuskDeg, elev));
+        const Vector3 view = Position() - GScene->GetCamera()->Position();
+        const float len = view.Size();
+        cosView = len > 1e-3f ? view.DotProduct(toSun) / len : 0.0f;
+        // The sun's way in the plume's cross-section: across the wind (the
+        // puff's sideways axis) and up.
+        sunAcross = -_spec.windZ * toSun.X() + _spec.windX * toSun.Z();
+        sunUp = std::max(sinSun, kPlumeSunSinMin);
+    }
+    // The sun: scattered toward the eye by the sun's angle (thin smoke
+    // forward, dense smoke on its sunlit side), through the plume between the
+    // puff and the sun: the way out of the cross-section's ellipse toward it
+    // (a metre along the ray moves sunAcross across and sunUp up).
+    const float ia = 1.0f / _semiAcross, iu = 1.0f / _semiUp;
+    const float qa = sunAcross * sunAcross * ia * ia + sunUp * sunUp * iu * iu;
+    const float qb = _offAcross * sunAcross * ia * ia + _offUp * sunUp * iu * iu;
+    const float qc = _offAcross * _offAcross * ia * ia + _offUp * _offUp * iu * iu - 1.0f;
+    const float disc = qb * qb - qa * qc;
+    const float out = qa > 1e-12f && disc > 0.0f ? std::max((-qb + std::sqrt(disc)) / qa, 0.0f) : 0.0f;
+    const float phase = PlumePhase(cosView, std::exp(-_tau));
+    const float tauSun = kPlumeSunPath * _density * out + 0.5f * _tau;
+    const PlumeRgb through = PlumeSunThrough(tauSun);
+    // The sky, less deep inside the plume.
+    const float r2 = _offAcross * _offAcross * ia * ia + _offUp * _offUp * iu * iu;
+    const float middle = 1.0f - std::min(std::sqrt(r2), 1.0f);
+    const float sky = night * (1.0f - kPlumeSkyShade * (1.0f - std::exp(-_plumeTopTau)) * middle);
+    gain[0] = (1.0f - sunShare) * sky + sunShare * phase * through.r;
+    gain[1] = (1.0f - sunShare) * sky + sunShare * phase * through.g;
+    gain[2] = (1.0f - sunShare) * sky + sunShare * phase * through.b;
+    // The flames' light on its underside: a fire's combat light on smoke
+    // (FirePlume.hpp kPlumeGlowPerLux, PlumeGlowNight).
+    for (int i = 0; i < 3; ++i)
+        fire[i] = _fire[i] * kPlumeGlowPerLux * glowNight;
+    return true;
 }
 
 CloudletSource::CloudletSource(LODShapeWithShadow* shape, float interval)

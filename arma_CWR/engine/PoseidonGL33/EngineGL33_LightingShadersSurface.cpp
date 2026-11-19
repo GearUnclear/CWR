@@ -228,6 +228,619 @@ const float kWetRingsFar = 40.0;    // rain rings on puddles within this distanc
 // land, 2 grass clutter, 3 the sea on the detail program (never wet).
 int g_wetDraw = 0;
 
+// ---- Scorched ground (the fire spread, POSEIDON_XP_FIRESPREAD) ----
+// The fire's burn map (World/Simulation/FireSpreadWorld.hpp GetBurnMap,
+// litBurnRect): a world-space map, 0 untouched, 1 burnt black, a cell still
+// flaming part way (about 0.4 to 0.9), in the first rows of an atlas whose
+// rows after them hold the land's height on a coarser grid over the same
+// window (litBurnGround). Only the land, grass and object mains declare its
+// sampler (burnMap, unit 17) and pass it in, and only while litBurnRect.w is
+// 1; every other program never calls these.
+const vec3 kBurnAsh = vec3(0.026, 0.022, 0.02);    // charred ground (linear albedo, the mean)
+const float kBurnTone = 0.3;                       // the ash's tone wanders by this share over 2 to 10 m ...
+const float kBurnMottle = 0.12;                    // ... and a soft mottling of under a metre by this share ...
+const float kBurnMottleFar = 30.0;                 // ... fading out by here (m: far mottling would shimmer)
+const float kBurnScorch = 0.55;                    // a still flaming cell's char keeps this of the ash colour
+const float kBurnWarp = 2.0;                       // the edge's raggedness: the map read up to this far off (m)
+const float kBurnSpecKeep = 0.2;                   // charred ground keeps this share of its specular
+const float kBurnGrassGone = 0.5;                  // grass clutter is gone above this burn ...
+const float kBurnGrassSinge = 0.85;                // ... and singes toward the ash below it, by up to this share
+// The specular the shaded fragment keeps (shadeRemastered): 1 off the burn.
+float g_burnSpec = 1.0;
+
+// The burn map's texel at map coordinates uv (0..1 over the window): the
+// atlas's burn rows, held off the height rows after them (no bilinear tap
+// blends a height in). 0 outside the window.
+float burnTexel(sampler2D map, vec2 uv) {
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+    uv.y = min(uv.y * litBurnGround.x, litBurnGround.x - 0.5 * litBurnGround.w);
+    return textureLod(map, uv, 0.0).r;
+}
+
+// The burn (0..1) at world xz: the map read through a two-octave warp of
+// about 3 m and 1 m cells, so its 4 m texels show as a ragged edge instead of
+// blocks; 0 outside the map. No derivatives: the map has one level.
+float burnAt(sampler2D map, vec2 xz) {
+    vec2 w = vec2(puddleNoise(xz * 0.35), puddleNoise(xz * 0.35 + vec2(41.3, 17.9))) - 0.5;
+    w += (vec2(puddleNoise(xz + vec2(7.1, 63.7)), puddleNoise(xz + vec2(91.5, 29.3))) - 0.5) * 0.5;
+    return burnTexel(map, (xz + w * (kBurnWarp / 0.75) - litBurnRect.xy) * litBurnRect.z);
+}
+
+// ---- Charred objects (the object main, while litBurnRect.w is 1) ----
+// Each object draw carries its char class in surfClass.w (EngineGL33::
+// ApplySurfaceClass): 2 a tree, a bush or a forest block, 1 any other static
+// object (a house, a wall, a rock, a fence), 0 never charred (men, vehicles,
+// weapons, decals on the ground). Leaves are the draws with a forced diffuse.
+const float kBurnObjectReach = 4.5;      // an object reads the burn this far round its foot (m) ...
+const float kBurnObjectRing = 0.85;      // ... at this share: a wall beside burnt ground catches it
+const vec3 kBurnSoot = vec3(0.022, 0.019, 0.017);     // soot on walls and rocks (linear albedo, the mean)
+const vec3 kBurnCharcoal = vec3(0.018, 0.015, 0.013); // a burnt trunk and its branches (linear albedo)
+const float kBurnObjectTone = 0.35;      // the soot's and the char's tone wander by this share
+const float kBurnObjectGrain = 0.35;     // and keep this share of the texture's own light and dark
+const float kBurnSootTop = 3.0;          // soot rises this high above the ground (m) on burnt-out ground ...
+const float kBurnSootTopFlaming = 0.55;  // ... this share of it beside a cell still flaming
+const float kBurnSootRagged = 0.45;      // its top wanders by this share up and down along the wall ...
+const float kBurnSootStreak = 1.6;       // ... and vertical streaks reach up to this much higher (m)
+const float kBurnSootFade = 0.55;        // the soot fades out over the top this share of its height
+const float kBurnSootMax = 0.92;         // the soot covers at most this much of the wall's colour
+const float kBurnTrunkScorch = 2.5;      // a tree's trunk is scorched this high while its cell flames (m) ...
+const float kBurnTrunkAll = 60.0;        // ... and charred to this height, the whole tree, once burnt out
+const float kBurnTrunkAllFrom = 0.85;    // burnt out: from this burn to 1
+const float kBurnCharMax = 0.97;         // the char covers at most this much of the bark's colour
+const float kBurnObjectSpec = 0.08;      // charred and sooted surfaces keep this share of their specular
+const float kBurnDetailFar = 120.0;      // streaks and fine raggedness fade out by here (m)
+const vec3 kBurnLeafBrown = vec3(0.10, 0.05, 0.02); // scorched leaves (linear albedo) ...
+const float kBurnLeafScorch = 0.12;      // ... from this burn ...
+const float kBurnLeafGone = 0.86;        // ... and gone above this one (a burnt-out cell is 1)
+const float kBurnLeafGoneJitter = 0.04;  // the threshold wanders by this much from clump to clump
+
+// The burn an object reads at world xz: the map at the fragment and on a
+// ring kBurnObjectReach round it (kBurnObjectRing of the strongest), so a
+// wall or a trunk standing on the edge of burnt ground catches it. No warp:
+// the char's own noise breaks its edges.
+float burnObjectAt(sampler2D map, vec2 xz) {
+    vec2 uv = (xz - litBurnRect.xy) * litBurnRect.z;
+    float r = kBurnObjectReach * litBurnRect.z;
+    float ring = max(max(burnTexel(map, uv + vec2(r, 0.0)), burnTexel(map, uv - vec2(r, 0.0))),
+                     max(burnTexel(map, uv + vec2(0.0, r)), burnTexel(map, uv - vec2(0.0, r))));
+    return max(burnTexel(map, uv), kBurnObjectRing * ring);
+}
+
+// The land's height (m) at world xz from the atlas's height grid, bilinear
+// between its samples (each at its square's centre); `fallback` without one.
+float burnGroundY(sampler2D map, vec2 xz, float fallback) {
+    float n = litBurnGround.y;
+    if (n < 0.5) return fallback;
+    vec2 g = clamp((xz - litBurnRect.xy) * litBurnRect.z * n, vec2(0.5), vec2(n - 0.5));
+    return textureLod(map, vec2(g.x * litBurnGround.z, litBurnGround.x + g.y * litBurnGround.w), 0.0).r;
+}
+
+// A leaf's fate in burn `b` at world position p: true when it has burnt away
+// (whole clumps of about a metre go together, at a threshold that wanders
+// round kBurnLeafGone, so a crown thins out instead of vanishing at once).
+bool burnLeafGone(float b, vec3 p) {
+    float n = puddleNoise(vec2(p.x + 0.6 * p.y, p.z - 0.4 * p.y) * 0.9 + vec2(11.3, 47.9));
+    return b > kBurnLeafGone + (n - 0.5) * 2.0 * kBurnLeafGoneJitter;
+}
+
+// Scorched leaves (display-space albedo): toward a dry brown, then toward
+// black as the cell burns out, keeping the texture's light and dark.
+vec3 burnLeaves(vec3 albedo, float b, vec3 p) {
+    float scorch = smoothstep(kBurnLeafScorch, 0.6, b);
+    if (scorch <= 0.0) return albedo;
+    float n = puddleNoise(vec2(p.x - 0.5 * p.y, p.z + 0.3 * p.y) * 0.7 + vec2(3.7, 29.1));
+    float grain = clamp(dot(toLinear(albedo), kLuma) / 0.06, 0.5, 1.6);
+    vec3 dry = mix(kBurnLeafBrown, kBurnCharcoal, smoothstep(0.6, kBurnLeafGone, b)) * (0.7 + 0.6 * n) * grain;
+    g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, scorch));
+    return mix(albedo, toDisplay(dry), scorch);
+}
+
+// A charred object's display-space albedo in burn `b` at world position p
+// with normal n: soot rising from the ground on walls and rocks (strongest at
+// the foot, gone by about kBurnSootTop up, its top ragged along the wall and
+// broken by vertical streaks, never a straight line); on a tree's trunk and
+// branches (vegetation) a scorch a few metres high while it flames, the
+// whole tree once it has burnt out. Sets g_burnSpec (soot is matt).
+vec3 burnObject(sampler2D map, vec3 albedo, float b, vec3 p, vec3 n, bool vegetation) {
+    float above = p.y - burnGroundY(map, p.xz, p.y - 1.0);
+    // Along the face, horizontally (a roof or a floor takes x, a little z).
+    vec2 t = vec2(-n.z, n.x) + vec2(1e-3, 3.7e-4);
+    float s = dot(p.xz, t * inversesqrt(dot(t, t)));
+    float near = 1.0 - smoothstep(0.5 * kBurnDetailFar, kBurnDetailFar, length(vWorldRel));
+    float ragged = 0.65 * puddleNoise(vec2(s * 0.6, 3.1)) + 0.35 * mix(0.5, puddleNoise(vec2(s * 1.9, 17.3)), near);
+    float top;
+    if (vegetation) {
+        top = mix(kBurnTrunkScorch, kBurnTrunkAll, smoothstep(kBurnTrunkAllFrom, 1.0, b)) *
+              (1.0 + kBurnSootRagged * 2.0 * (ragged - 0.5));
+    } else {
+        float streak = puddleNoise(vec2(s * 3.5, p.y * 0.22 + 7.7)) * near;
+        top = kBurnSootTop * mix(kBurnSootTopFlaming, 1.0, smoothstep(0.4, 0.95, b)) *
+                  (1.0 + kBurnSootRagged * 2.0 * (ragged - 0.5)) +
+              kBurnSootStreak * smoothstep(0.55, 0.85, streak);
+    }
+    float cover = smoothstep(0.03, 0.4, b) * (1.0 - smoothstep((1.0 - kBurnSootFade) * top, top, above));
+    if (cover <= 0.0) return albedo;
+    float tone = 0.6 * puddleNoise(vec2(s, p.y) * 1.1 + vec2(5.1, 0.0)) + 0.4 * mix(0.5, puddleNoise(vec2(s, p.y) * 3.7), near);
+    float grain = mix(1.0, clamp(dot(toLinear(albedo), kLuma) / 0.2, 0.4, 1.8), kBurnObjectGrain);
+    vec3 soot = (vegetation ? kBurnCharcoal : kBurnSoot) * (1.0 + kBurnObjectTone * 2.0 * (tone - 0.5)) * grain;
+    g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, cover));
+    return mix(albedo, toDisplay(soot), cover * (vegetation ? kBurnCharMax : kBurnSootMax));
+}
+
+// The land's display-space albedo over the burn `b` at world xz: black-brown
+// ash whose tone wanders softly over a few metres, mottled softly below a
+// metre where it has burnt out, darker still where the cell is flaming. Only
+// smooth noise (puddleNoise), so no hard steps anywhere. Sets g_burnSpec (the
+// ash is matt).
+vec3 burnGround(vec3 albedo, float b, vec2 xz) {
+    float cover = smoothstep(0.03, 0.45, b);
+    float flaming = smoothstep(0.3, 0.45, b) * (1.0 - smoothstep(0.85, 0.95, b));
+    // Tone: cells of about 8 m and 2.5 m, 0..1.
+    float tone = 0.65 * puddleNoise(xz * 0.12 + vec2(13.7, 5.1)) + 0.35 * puddleNoise(xz * 0.4 + vec2(3.3, 57.1));
+    // Mottling: cells of about 0.6 m and 0.25 m, 0..1, on burnt-out ground near the eye.
+    float mottle = 0.6 * puddleNoise(xz * 1.7 + vec2(29.9, 81.3)) + 0.4 * puddleNoise(xz * 4.1 + vec2(67.1, 7.7));
+    float mottleW = smoothstep(0.85, 0.95, b) * (1.0 - smoothstep(0.5 * kBurnMottleFar, kBurnMottleFar, length(vWorldRel)));
+    vec3 ash = kBurnAsh * (1.0 + kBurnTone * 2.0 * (tone - 0.5)) * (1.0 + kBurnMottle * 2.0 * (mottle - 0.5) * mottleW);
+    ash *= mix(1.0, kBurnScorch, flaming);
+    g_burnSpec = mix(1.0, kBurnSpecKeep, cover);
+    return mix(albedo, toDisplay(ash), cover);
+}
+
+// Grass clutter's display-space albedo at the fire's edge (b at most
+// kBurnGrassGone; above it the main discards the blade): singed toward the ash.
+vec3 burnGrass(vec3 albedo, float b) {
+    float singe = smoothstep(0.1, kBurnGrassGone, b) * kBurnGrassSinge;
+    return mix(albedo, toDisplay(kBurnAsh * 1.5), singe);
+}
+
+// ---- Firelight (the land, grass and object mains, while litBurnRect.w is 1) ----
+// From the atlas's two heat grids (EngineGL33_Lighting.cpp BuildFireHeat, at
+// the simulation's cell, rebuilt every frame from the flames as drawn): the
+// ember grid, each cell's ash glow, and the halo grid, the light each cell
+// takes from the flames round it, already flickered and cut by the land
+// between (no light through a hill), both on the rig's scale of a lux (the
+// fire's light by day and by night: CombatLights.hpp kWildfireRigPerLux and
+// WildfireLightGain), so both are scene light, lit and exposed with the frame
+// (shadeRemastered adds the halo to the combat light and the glow to the
+// radiance before the exposure).
+const vec3 kFireLight = vec3(3.049, 0.488, 0.0366); // the flames' light: CombatLights.hpp kWildfireRgb at luminance 1
+const float kFireLightSide = 0.35;                // a vertical face takes this share of it, a face turned down none
+const float kFireLightHeight = 6.0;               // objects: it fades out by this height above the ground (m)
+const vec3 kEmberColour = vec3(1.0, 0.22, 0.035); // embers in a flaming cell's ash (linear) ...
+const float kEmberNits = 12.0;                    // ... their luminance on their hot veins (cd/m2) at full glow
+const float kEmberVeins = 0.08;                   // the share of the ash that glows (a noise threshold) ...
+const float kEmberBase = 0.0;                     // ... and the dull glow between the veins, as a share of theirs
+const float kEmberCrawl = 3.0;                    // the veins wander this far (noise cells) and back, slowly
+const float kEmberFar = 80.0;                     // their fine mottling fades out by here (m): far, an even glow
+// What the fire adds to this fragment (shadeRemastered): the light it takes
+// (irradiance on the rig's scale), and the ash's own glow (scene light).
+vec3 g_fireLight = vec3(0.0);
+vec3 g_fireEmit = vec3(0.0);
+
+// One heat grid at world xz (0 the embers, 1 the halo); 0 outside the window
+// or without the grids.
+float burnHeatAt(sampler2D map, vec2 xz, float grid) {
+    float n = litBurnHeat.x;
+    if (n < 0.5) return 0.0;
+    vec2 uv = (xz - litBurnRect.xy) * litBurnRect.z;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+    vec2 g = clamp(uv * n, vec2(0.5), vec2(n - 0.5));
+    return textureLod(map, vec2((g.x + grid * n) * litBurnGround.z, litBurnHeat.y + g.y * litBurnGround.w), 0.0).r;
+}
+
+// The firelight on a fragment at world xz whose normal's y is `up`, times
+// `lift` (1 on the ground): sets g_fireLight. Up-facing surfaces take it all.
+void burnFireLight(sampler2D map, vec2 xz, float up, float lift) {
+    float halo = burnHeatAt(map, xz, 1.0);
+    if (halo <= 0.0) return;
+    float facing = up >= 0.0 ? mix(kFireLightSide, 1.0, up) : kFireLightSide * (1.0 + up);
+    g_fireLight = kFireLight * (halo * facing * lift);
+}
+
+// Embers smouldering in a flaming cell's ash (the land): veins of glow that
+// crawl and pulse slowly, brightest just behind the flames, gone as the ash
+// cools. Sets g_fireEmit: a luminance of kEmberNits on the rig's scale (as a
+// white surface, whose materials carry 1.6, lit by pi L lux), so by day it
+// is lost in the sun.
+void burnEmbers(sampler2D map, vec2 xz) {
+    float heat = burnHeatAt(map, xz, 0.0);
+    if (heat <= 0.0) return;
+    float t = litBurnHeat.z;
+    float near = 1.0 - smoothstep(0.5 * kEmberFar, kEmberFar, length(vWorldRel));
+    vec2 crawl = vec2(sin(t * 0.05), cos(t * 0.04)) * kEmberCrawl;
+    float n = 0.6 * puddleNoise(xz * 0.8 + crawl) +
+              0.4 * mix(0.5, puddleNoise(xz * 2.6 - crawl * 1.7 + vec2(19.1, 7.3)), near);
+    float veins = mix(kEmberVeins, smoothstep(1.0 - kEmberVeins, 1.2 - kEmberVeins, n), near);
+    float pulse = 0.8 + 0.2 * sin(t * 1.7 + n * 6.2832);
+    g_fireEmit = kEmberColour * (kEmberNits * 3.14159265 * 1.6 * heat * mix(kEmberBase, 1.0, veins) * pulse);
+}
+
+// ---- A burning wreck (followups; the object main, while litBurnRect.w is 1) ----
+// A vehicle the fire burns, or a proxy of one (FireSpreadWorld.hpp
+// WreckBurnClass: surfClass.w 3 and up, its char in 128 steps, its shell's
+// glow in 64 and that glow's light on the scene's scale, log-packed, after
+// the 3). The consult's tenth answer: a car's paint goes "to grey and
+// rust-brown, glass gone, tyres to wire"; its thin bodywork glows dull red by
+// night while it burns, its shell hot for hours after. Its paint first
+// blisters black where its flames stand (low first: its fuel burns under it),
+// then burns clean to a grey ash mottled with rust-brown, a share of it left
+// black; its glass breaks out early, pane by pane; its canvas and its
+// camouflage branches burn away in ragged holes, black at their edges; its
+// rubber chars black, then greys with ash. By night its hot shell glows dull
+// red in patches (g_fireEmit, scene light on the ground's embers' scale),
+// over most of its lower half while it flames, shrinking to embers low in its
+// floor and wheels as it cools.
+const vec3 kWreckSoot = vec3(0.018, 0.016, 0.014);      // blistered, sooted paint (linear albedo)
+const vec3 kWreckAsh = vec3(0.13, 0.125, 0.115);        // paint burnt clean to its grey ash ...
+const vec3 kWreckRust = vec3(0.15, 0.055, 0.022);       // ... and the heat-scaled steel, rusting
+const vec3 kWreckRubberAsh = vec3(0.045, 0.042, 0.04);  // burnt rubber, greyed with ash
+const float kWreckBlackKeep = 0.3;   // the share of its burnt shell left black (streaks, under its edges)
+const float kWreckRustShare = 0.45;  // the share of its clean-burnt metal gone rust-brown
+const float kWreckLowM = 2.5;        // its lower parts char first and glow longest, up to this high (m)
+const float kWreckThrMax = 0.6;      // the char its last spots need to blacken (its top, here and there)
+const vec3 kWreckGlowHot = vec3(1.0, 0.18, 0.03);       // its glow, hot ...
+const vec3 kWreckGlowCool = vec3(1.0, 0.06, 0.008);     // ... and cooling (linear)
+const float kWreckGlowLogMin = -7.0, kWreckGlowLogSpan = 8.0; // FireSpreadWorld.hpp, its glow's light's packing
+
+// A wreck's look at world position p (normal n; originY its origin's
+// height; leaves: a draw with a forced diffuse, camouflage branches): its
+// display-space albedo burnt by its char, g_burnSpec (char is matt) and
+// g_fireEmit (its glow). False when the fragment has burnt away (glass,
+// canvas, branches).
+bool burnWreck(sampler2D map, float code, float cls, inout vec3 albedo, vec3 p, vec3 n, float originY, bool leaves) {
+    float f = floor((code - 3.0) * 2097152.0 + 0.5);
+    float cq = floor(f / 16384.0);
+    float rest = f - cq * 16384.0;
+    float gq = floor(rest / 256.0);
+    float eq = rest - gq * 256.0;
+    float charK = cq / 127.0;
+    float glow = gq / 63.0;
+    float light = eq > 0.5 ? pow(10.0, kWreckGlowLogMin + (eq - 1.0) / 254.0 * kWreckGlowLogSpan) : 0.0;
+    int k = int(cls + 0.5);
+    float near = 1.0 - smoothstep(0.5 * kBurnDetailFar, kBurnDetailFar, length(vWorldRel));
+    vec2 uv = (p.xz - litBurnRect.xy) * litBurnRect.z;
+    bool inMap = all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
+    float above = p.y - (inMap ? burnGroundY(map, p.xz, originY - 1.0) : originY - 1.0);
+    float low = 1.0 - smoothstep(0.2, kWreckLowM, above);
+    // patches of about a metre and a quarter metre over its body, different
+    // on each face (the normal shifts them)
+    vec3 q = p + n * 0.37;
+    float n1 = puddleNoise(vec2(q.x + 0.61 * q.y, q.z - 0.47 * q.y) * 1.1 + vec2(13.1, 7.7));
+    float n2 = mix(0.5, puddleNoise(vec2(q.z - 0.53 * q.y, q.x + 0.39 * q.y) * 3.7 + vec2(3.9, 41.7)), near);
+    float n3 = puddleNoise(vec2(q.x - 0.29 * q.y, q.z + 0.71 * q.y) * 0.8 + vec2(57.3, 21.9));
+    float pat = 0.65 * n1 + 0.35 * n2;
+    // the char this spot needs to blacken: low and patchy first
+    float thr = clamp((0.05 + 0.5 * (1.0 - low)) * (0.6 + 0.8 * pat), 0.0, kWreckThrMax);
+    float soot = smoothstep(thr, thr + 0.15, charK);
+    float clean = smoothstep(thr + 0.25, thr + 0.55, charK) *
+                  smoothstep(kWreckBlackKeep - 0.08, kWreckBlackKeep + 0.08, n3);
+    if (k == 3 || k == 12) {
+        // glass and lenses crack and fall out early, pane by pane
+        if (charK > 0.06 + 0.2 * n1 + 0.12 * (1.0 - low)) return false;
+    } else if (k == 5 || leaves) {
+        // canvas and camouflage branches burn away in ragged holes, black at
+        // their edges (branches first: dry leaves go in the first minutes)
+        if (charK > (leaves ? 0.5 * thr + 0.04 + 0.12 * n2 : thr + 0.1 + 0.2 * n2)) return false;
+        clean = 0.0;
+    }
+    vec3 base = toLinear(albedo);
+    float grain = mix(1.0, clamp(dot(base, kLuma) / 0.15, 0.5, 1.6), 0.35);
+    vec3 c = mix(base, kWreckSoot * (0.8 + 0.4 * n2), soot);
+    if (k == 4) {
+        c = mix(c, kWreckRubberAsh * (0.8 + 0.4 * n2), clean);
+    } else if (k != 5 && k != 9 && k != 10 && !leaves) {
+        float rust = 1.0 - smoothstep(kWreckRustShare - 0.12, kWreckRustShare + 0.12, n2 * 0.5 + n1 * 0.5);
+        vec3 burnt = mix(kWreckAsh, kWreckRust, rust) * (0.75 + 0.5 * n2) * grain;
+        c = mix(c, burnt, clean);
+    }
+    g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, max(soot, clean)));
+    albedo = toDisplay(c);
+    // its hot shell's glow: over much of its lower half while it flames, in
+    // fewer patches, low in its floor and wheels, as it cools; only where it
+    // has burnt
+    if (light > 0.0 && k != 3 && k != 12 && k != 5 && !leaves) {
+        float t = litBurnHeat.z;
+        vec2 crawl = vec2(sin(t * 0.05), cos(t * 0.04)) * 0.6;
+        // patches of about half a metre and a sixth, so a panel glows in
+        // places, never whole
+        float ng = 0.6 * puddleNoise(vec2(q.x - 0.3 * q.y, q.z + 0.5 * q.y) * 2.2 + crawl + vec2(71.3, 9.1)) +
+                   0.4 * mix(0.5, puddleNoise(vec2(q.z + 0.2 * q.y, q.x - 0.6 * q.y) * 6.0 - crawl + vec2(5.3, 88.1)), near);
+        // (a noise threshold: about 0.35 over its low parts in its flames,
+        // most of them glowing; about 0.5 just after them, half; 0.7 at the
+        // end, a few specks; its tyres' wire and its rubber's ash at half)
+        float thrG = 0.78 - 0.45 * sqrt(glow) * (0.45 + 0.55 * low);
+        float m = smoothstep(thrG, thrG + 0.18, ng) * smoothstep(0.3, 0.7, soot) * (k == 4 ? 0.5 : 1.0);
+        float pulse = 0.85 + 0.15 * sin(t * 1.3 + ng * 6.2832);
+        g_fireEmit = mix(kWreckGlowCool, kWreckGlowHot, glow) * (light * m * pulse);
+    }
+    return true;
+}
+
+// ---- Plants' own fire (the object main, while litBurnRect.w is 1) ----
+// The fire spread's plant table (FireSpreadWorld.hpp PlantTable) in the burn
+// atlas's last rows, from row litBurnHeat.w on (0: none): every tree, bush,
+// reed clump and olive the fire came near, found by its foot (the drawn
+// object's origin), with what happened to it, its times counted from when the
+// drawn flames reached it (its contact, on the fire clock litBurnHeat.z
+// wrapped at kPlantClockWrap). Its leaves scorch, burn away and char, and its
+// bark chars, from that alone, never from the cells' burn map: every edge is
+// a smooth noise contour in the world, and everything moves on with the clock.
+const int kPlantSlotFloats = 32;           // FireSpreadWorld.hpp kPlantSlotFloats
+const int kPlantProbes = 16;               // ... kPlantProbes
+const float kPlantKeyNear = 0.06;          // ... kPlantKeyNearM
+const float kPlantClockWrap = 628.31853;   // ... kPlantClockWrap
+const vec3 kPlantEmber = vec3(1.0, 0.3, 0.05); // a burning leaf's glow (display-linear) ...
+const float kPlantEmberGlow = 0.35;           // ... at this light on the burning sweep's edge
+const float kPlantStrandPx = 0.8;             // a kept stem is at least this many pixels' noise wide
+
+// The plant whose foot is at world xz: its slot's first texel in the atlas,
+// x -1 without one. The bucket and the probing are PlantTable::Find's.
+ivec2 burnPlantAt(sampler2D map, vec2 xz) {
+    if (litBurnHeat.w < 0.5) return ivec2(-1);
+    int row0 = int(litBurnHeat.w + 0.5);
+    int perRow = int(1.0 / litBurnGround.z + 0.5) / kPlantSlotFloats;
+    int slots = (int(1.0 / litBurnGround.w + 0.5) - row0) * perRow;
+    if (perRow <= 0 || slots <= 0) return ivec2(-1);
+    ivec2 b = ivec2(floor(xz));
+    uint mask = uint(slots - 1);
+    uint s = uint(b.x) * 73856093u ^ uint(b.y) * 19349663u;
+    s ^= s >> 16;
+    s *= 0x85ebca6bu;
+    s ^= s >> 13;
+    s *= 0xc2b2ae35u;
+    s ^= s >> 16;
+    s &= mask;
+    for (int i = 0; i < kPlantProbes; ++i) {
+        ivec2 at = ivec2((int(s) % perRow) * kPlantSlotFloats, row0 + int(s) / perRow);
+        float kx = texelFetch(map, at, 0).r;
+        if (kx < -1.0e8) break;
+        if (abs(kx - xz.x) < kPlantKeyNear && abs(texelFetch(map, at + ivec2(1, 0), 0).r - xz.y) < kPlantKeyNear)
+            return at;
+        s = (s + 1u) & mask;
+    }
+    return ivec2(-1);
+}
+
+// One of a plant's fields (FireSpreadWorld.hpp PlantSlotField).
+float plantField(sampler2D map, ivec2 at, int k) {
+    return texelFetch(map, at + ivec2(k, 0), 0).r;
+}
+
+// Seconds since a plant's contact: -1 before it, very long once its look is final.
+float plantSince(float contact) {
+    if (contact > 1.0e8) return -1.0;
+    if (contact < -0.5) return 1.0e6;
+    return mod(litBurnHeat.z - contact, kPlantClockWrap);
+}
+
+// A plant's leaf fragment at world p (origin: its foot) in its own fire: the
+// display-space albedo scorched brown from the ground up to a soft ragged top
+// (rising from the flames' height to its own, higher on the lee side), and,
+// while it flares or torches, burnt away clump by clump in a ragged sweep
+// from its windward base to its lee top (its scorched leaves charring
+// toward its scorchChar over the sweep's first third; each going clump brown,
+// then black and glowing on the sweep's edge, then gone: false, discard), the
+// clumps it keeps charred toward its keptChar (thin strands, its stems, for a
+// thicket or a reed clump; pixM, the fragment's footprint in metres, keeps
+// them about a pixel wide at least). Sets g_burnSpec and g_fireEmit.
+bool plantLeaves(sampler2D map, ivec2 at, vec3 p, vec3 origin, float pixM, inout vec3 albedo) {
+    float since = plantSince(plantField(map, at, 4));
+    if (since < 0.0) return true;
+    float h = max(plantField(map, at, 3), 0.3);
+    float above = p.y - plantField(map, at, 2);
+    vec2 dir = vec2(plantField(map, at, 5), plantField(map, at, 6));
+    // -1 on the side the fire came from, 1 on its lee
+    float side = clamp(dot(p.xz - origin.xz, dir) / max(0.6 * h, 0.5), -1.0, 1.0);
+    float top = plantField(map, at, 7);
+    float rise = max(plantField(map, at, 8), 0.1);
+    float ragged = puddleNoise(vec2(p.x + 0.5 * p.y, p.z - 0.3 * p.y) * 0.6 + vec2(17.3, 5.9));
+    float topNow = top * mix(0.35, 1.0, smoothstep(0.0, rise, since)) * (1.0 + 0.2 * side) * (0.8 + 0.4 * ragged);
+    float brown = (1.0 - smoothstep(topNow - 0.5, topNow + 0.3, above)) * smoothstep(0.0, 1.5, since);
+    float black = 0.0;
+    float b0 = plantField(map, at, 11), b1 = plantField(map, at, 12);
+    if (b1 > b0) {
+        // In its flames its scorched leaves char (a dark lattice) over the
+        // sweep's first third.
+        float charring = plantField(map, at, 20) * smoothstep(b0, mix(b0, b1, 0.3), since) * brown;
+        float sweep = mix(-0.35, plantField(map, at, 13) + 0.05, clamp((since - b0) / (b1 - b0), 0.0, 1.0));
+        float u = clamp(above / h, 0.0, 1.0);
+        float order = 0.6 * (0.7 * u + 0.3 * (0.5 + 0.5 * side)) +
+                      0.4 * puddleNoise(vec2(p.x - 0.4 * p.y, p.z + 0.7 * p.y) * 0.8 + vec2(3.1, 61.7));
+        float f = sweep - order; // over 0: the sweep has passed
+        float clump = max(plantField(map, at, 18), 0.2);
+        float nk = puddleNoise(vec2(p.x + 0.6 * p.y, p.z - 0.4 * p.y) / clump + vec2(11.3, 47.9));
+        // What it keeps: its highest clumps, or (a skeleton of stems) a band
+        // round the noise's median, never under kPlantStrandPx pixels wide.
+        bool goes = plantField(map, at, 21) > 0.5
+                        ? abs(nk - 0.5) >= max(plantField(map, at, 14), kPlantStrandPx * pixM / clump)
+                        : nk < plantField(map, at, 14);
+        goes = goes && above > plantField(map, at, 17);
+        if (goes) {
+            if (f > 0.0) return false;
+            brown = max(brown, smoothstep(-0.3, -0.12, f));
+            black = max(charring, smoothstep(-0.12, -0.02, f));
+            float edge = smoothstep(-0.1, -0.04, f) * (1.0 - smoothstep(-0.02, 0.0, f));
+            g_fireEmit = max(g_fireEmit, kPlantEmber * (kPlantEmberGlow * plantField(map, at, 19) * edge));
+        } else {
+            brown = max(brown, smoothstep(-0.3, -0.05, f));
+            black = max(charring, plantField(map, at, 15) * smoothstep(-0.05, 0.15, f));
+        }
+    }
+    float scorch = max(brown, black);
+    if (scorch <= 0.0) return true;
+    float n = puddleNoise(vec2(p.x - 0.5 * p.y, p.z + 0.3 * p.y) * 0.7 + vec2(3.7, 29.1));
+    float grain = clamp(dot(toLinear(albedo), kLuma) / 0.06, 0.5, 1.6);
+    vec3 dry = mix(kBurnLeafBrown, kBurnCharcoal, black) * (0.7 + 0.6 * n) * grain;
+    g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, scorch));
+    albedo = mix(albedo, toDisplay(dry), scorch);
+    return true;
+}
+
+// A plant's bark (its trunk and branches) at world p in its own fire: the
+// display-space albedo charred from the ground up, higher on the lee side
+// with a ragged slanted top, and whole up to its frame top as its flare or
+// torch climbs it. Sets g_burnSpec (char is matt).
+vec3 plantBark(sampler2D map, ivec2 at, vec3 albedo, vec3 p, vec3 origin) {
+    float since = plantSince(plantField(map, at, 4));
+    if (since < 0.0) return albedo;
+    float above = p.y - plantField(map, at, 2);
+    vec2 dir = vec2(plantField(map, at, 5), plantField(map, at, 6));
+    vec2 rel = p.xz - origin.xz;
+    vec2 ring = rel * inversesqrt(max(dot(rel, rel), 1e-6));
+    float side = dot(ring, dir);
+    float near = 1.0 - smoothstep(0.5 * kBurnDetailFar, kBurnDetailFar, length(vWorldRel));
+    float ragged = 0.65 * puddleNoise(ring * 1.7 + origin.xz * 0.37) +
+                   0.35 * mix(0.5, puddleNoise(ring * 4.3 + vec2(p.y * 0.8, 9.7)), near);
+    float top = mix(plantField(map, at, 9), plantField(map, at, 10), smoothstep(-0.9, 0.9, side));
+    top *= mix(0.4, 1.0, smoothstep(0.0, 4.0, since)) * (1.0 + kBurnSootRagged * 2.0 * (ragged - 0.5));
+    float b0 = plantField(map, at, 11), b1 = plantField(map, at, 12);
+    if (b1 > b0) top = max(top, plantField(map, at, 16) * smoothstep(b0, b1, since));
+    float cover = smoothstep(0.0, 1.5, since) * (1.0 - smoothstep(0.7 * top, top, above));
+    if (cover <= 0.0) return albedo;
+    float tone = 0.6 * puddleNoise(vec2(dot(ring, vec2(-dir.y, dir.x)) * 2.0, p.y * 1.1) + vec2(5.1, 0.0)) +
+                 0.4 * mix(0.5, puddleNoise(vec2(p.x + p.z, p.y) * 3.7), near);
+    float grain = mix(1.0, clamp(dot(toLinear(albedo), kLuma) / 0.2, 0.4, 1.8), kBurnObjectGrain);
+    vec3 soot = kBurnCharcoal * (1.0 + kBurnObjectTone * 2.0 * (tone - 0.5)) * grain;
+    g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, cover));
+    return mix(albedo, toDisplay(soot), cover * kBurnCharMax);
+}
+
+// ---- A building's own fire (buildings builder; the object main, while litBurnRect.w is 1) ----
+// A building the fire set alight has a slot in the plant table (found by its
+// origin as a plant is; FireSpreadWorld.cpp WriteBuildingLook), marked
+// kBuildingMark in its last field: its ground (2) and height (3), its soot's
+// reach down its walls from the eaves as a share of their height (5), its char all over once
+// its roof is in (6), its rubble's glow (7), the share of its windows alight
+// (8: their fans of soot), its wall tops (9), how far a shed or a barn has
+// burnt away (10: its lowest metre is left), and how far a gutted stone
+// house's or church's roof has fallen in (15: its faces above the wall tops go,
+// a ragged hole first; the walls, gables and chimney stand), and 1 once it is
+// gutted and wears its shell (16, end-state agent: FireShell.hpp).
+const float kBuildingMark = 7777.0;   // FireSpreadWorld.cpp kBuildingMark
+const float kBuildingFanM = 3.5;      // a window every this along a wall (FireSpreadWorld.cpp kWindowSpacingM)
+const float kBuildingFanHead = 2.1;   // the fans rise from the window heads (kWindowTopM)
+const float kBuildingGlowShare = 0.5; // the rubble's glow on its low walls, a share of the ash's embers
+// A gutted shell's glow by day, a share of its glow by night (the day:
+// litBurnRect.w less 1, by the sun's elevation, EngineGL33_Lighting.cpp
+// UploadLitBurn): by day only a faint shimmer of it shows, at dusk and by
+// night all of it (the owner: no strong orange by day).
+const float kBuildingDayGlow = 0.004;
+float buildingGlowByDay() {
+    return mix(1.0, kBuildingDayGlow, clamp(litBurnRect.w - 1.0, 0.0, 1.0));
+}
+const float kBuildingRubbleGlow = 0.1; // (end-state agent) the gutted shell's rubble: its veins and points, dull
+
+ivec2 burnBuildingAt(sampler2D map, vec2 xz) {
+    ivec2 at = burnPlantAt(map, xz);
+    if (at.x < 0 || abs(plantField(map, at, kPlantSlotFloats - 1) - kBuildingMark) > 0.5) return ivec2(-1);
+    return at;
+}
+
+// A building's fragment at world p (normal n) in its own fire: the
+// display-space albedo sooted from its eaves down as far as its fire has
+// gone (a ragged edge), with fans of soot above its windows, charred all
+// over once burnt out (its roof's faces first); its rubble's red glow low on
+// its walls by night (g_fireEmit). False (discard) above what is left of a
+// shed or a barn that has burnt away, and for a gutted shell's roof. Sets
+// g_burnSpec.
+bool burnBuilding(sampler2D map, ivec2 at, inout vec3 albedo, vec3 p, vec3 n) {
+    float h = max(plantField(map, at, 3), 1.0);
+    float above = p.y - plantField(map, at, 2);
+    float gone = plantField(map, at, 10);
+    if (gone > 0.0 && above > mix(h + 1.0, 0.8, gone)) return false;
+    float soot = plantField(map, at, 5), charred = plantField(map, at, 6), glow = plantField(map, at, 7);
+    float windows = plantField(map, at, 8), wallM = plantField(map, at, 9);
+    // The roof fallen in: its faces (turned up or down, above the wall tops)
+    // go in ragged holes as it falls; the upright faces stay (walls, gables,
+    // the chimney, a church's tower).
+    float roof = plantField(map, at, 15);
+    if (roof > 0.0 && above > wallM - 0.3 && abs(n.y) > 0.3 &&
+        puddleNoise(p.xz * 0.45 + vec2(2.3, 8.1)) < roof * 1.2 - 0.05)
+        return false;
+    // (end-state agent) The rubble inside a gutted shell (FireShell.cpp: the
+    // roof's own tiles fallen in, 0.3 to 1 m deep): broken red tile mottled
+    // with grey-white ash and burnt lime, black only in scattered charred
+    // pieces (the eleventh answer), its embers glowing in patches by night.
+    // Found as the faces turned up, low, inside the walls of a gutted house
+    // (16: FireSpreadWorld.cpp WriteBuildingLook, 1 once its shell is on).
+    if (plantField(map, at, 16) > 0.5 && n.y > 0.6 && above < min(1.4, wallM - 0.4)) {
+        vec2 lp = p.xz - vec2(plantField(map, at, 0), plantField(map, at, 1));
+        vec2 ax = vec2(plantField(map, at, 11), plantField(map, at, 12));
+        float lx = abs(dot(lp, ax)), lz = abs(dot(lp, vec2(-ax.y, ax.x)));
+        if (lx < plantField(map, at, 13) - 0.1 && lz < plantField(map, at, 14) - 0.1) {
+            float ash = smoothstep(0.42, 0.68, puddleNoise(p.xz * 0.9 + vec2(3.7, 1.3)));
+            float burnt = smoothstep(0.6, 0.78, puddleNoise(p.xz * 2.3 + vec2(9.1, 4.2)));
+            vec3 tile = toLinear(albedo) * vec3(0.85, 0.74, 0.68);
+            vec3 ashC = vec3(0.30, 0.285, 0.265) * (0.8 + 0.45 * puddleNoise(p.xz * 5.3 + vec2(1.1, 7.7)));
+            vec3 c = mix(tile, ashC, 0.7 * ash);
+            c = mix(c, kBurnSoot * 1.6, 0.85 * burnt);
+            c = mix(c, kBurnSoot * 3.0, 0.2 * charred);
+            albedo = toDisplay(c);
+            g_burnSpec = min(g_burnSpec, kBurnObjectSpec);
+            if (glow > 0.0) {
+                // thin veins through the heap and points where the charred
+                // pieces lie, dull red (kBuildingRubbleGlow of a cell's bed)
+                float vn = puddleNoise(p.xz * 2.2 + vec2(litBurnHeat.z * 0.02, 5.0));
+                float vein = smoothstep(0.9, 0.98, 1.0 - abs(2.0 * vn - 1.0));
+                float spot = smoothstep(0.7, 0.85, puddleNoise(p.xz * 4.5 + vec2(2.0, 9.0))) * burnt;
+                g_fireEmit = max(g_fireEmit, kEmberColour * (kEmberNits * 3.14159265 * 1.6 * kBuildingRubbleGlow * glow *
+                                                             buildingGlowByDay() * max(vein, spot)));
+            }
+            return true;
+        }
+    }
+    vec2 t = vec2(-n.z, n.x) + vec2(1e-3, 3.7e-4);
+    float s = dot(p.xz, t * inversesqrt(dot(t, t)));
+    float near = 1.0 - smoothstep(0.5 * kBurnDetailFar, kBurnDetailFar, length(vWorldRel));
+    float ragged = 0.65 * puddleNoise(vec2(s * 0.6, 3.1)) + 0.35 * mix(0.5, puddleNoise(vec2(s * 1.9, 17.3)), near);
+    // Smoke pushing out under the roof stains the walls from the eaves down
+    // (ragged), as far as its fire has gone (soot 0..1 of the wall's height);
+    // the roof's edge with it.
+    float down = soot * wallM * (0.75 + 0.5 * ragged);
+    float cover = soot > 0.0 ? smoothstep(wallM - down - 0.4, wallM - down + 0.6, above) *
+                                   (1.0 - smoothstep(wallM + 0.6, wallM + 1.6, above))
+                             : 0.0;
+    // Fans above the windows: from each window head up to the wall tops,
+    // widening as they rise.
+    float u = s / kBuildingFanM + 0.3 * puddleNoise(vec2(s * 0.15, 5.0));
+    float across = abs(fract(u) - 0.5) / (0.18 + 0.12 * max(above - kBuildingFanHead, 0.0));
+    float fan = (1.0 - smoothstep(0.6, 1.0, across)) * smoothstep(kBuildingFanHead - 0.3, kBuildingFanHead + 0.2, above) *
+                (1.0 - smoothstep(wallM, wallM + 1.0, above)) * clamp(windows * 1.5, 0.0, 1.0);
+    cover = max(cover, 0.9 * fan);
+    // Charred all over as it burns out, the faces turned up (the roof's
+    // rubble, the wall tops) first.
+    cover = max(cover, charred * mix(0.75, 1.0, smoothstep(0.2, 0.6, n.y)));
+    cover *= 0.85 + 0.3 * puddleNoise(vec2(s, p.y) * 1.3 + vec2(7.0, 3.0));
+    cover = clamp(cover, 0.0, 1.0);
+    if (cover > 0.0) {
+        float tone = 0.6 * puddleNoise(vec2(s, p.y) * 1.1 + vec2(5.1, 0.0)) + 0.4 * mix(0.5, puddleNoise(vec2(s, p.y) * 3.7), near);
+        float grain = mix(1.0, clamp(dot(toLinear(albedo), kLuma) / 0.2, 0.4, 1.8), kBurnObjectGrain);
+        vec3 c = kBurnSoot * (1.0 + kBurnObjectTone * 2.0 * (tone - 0.5)) * grain;
+        g_burnSpec = min(g_burnSpec, mix(1.0, kBurnObjectSpec, cover));
+        albedo = mix(albedo, toDisplay(c), cover * kBurnSootMax);
+    }
+    // The rubble's glow (end-state agent: the eleventh answer, "the glow is
+    // inside and low"): what lies flat low down glows, its veins slow; the
+    // walls' inner faces are lit from below by the bed, fading up them and
+    // flickering slowly; stone never glows itself, and the outer faces stay
+    // dark (the bed shows through the openings only).
+    if (glow > 0.0) {
+        vec2 toC = vec2(plantField(map, at, 0), plantField(map, at, 1)) - p.xz;
+        // inside the walls (a doorstep or a plinth outside them never glows)
+        vec2 ax = vec2(plantField(map, at, 11), plantField(map, at, 12));
+        float inFoot = step(abs(dot(toC, ax)), plantField(map, at, 13) - 0.1) *
+                       step(abs(dot(toC, vec2(-ax.y, ax.x))), plantField(map, at, 14) - 0.1);
+        float inner = smoothstep(0.05, 0.4, dot(n.xz, toC) * inversesqrt(max(dot(toC, toC), 1e-4)));
+        float lit = inFoot * inner * (1.0 - smoothstep(0.2, 2.6, above)) *
+                    (0.75 + 0.25 * puddleNoise(vec2(litBurnHeat.z * 0.15, s * 0.3)));
+        float low = inFoot * (1.0 - smoothstep(0.0, 1.2, above)) * smoothstep(0.5, 0.8, n.y);
+        float veins = smoothstep(0.5, 0.8, puddleNoise(p.xz * 1.7 + vec2(litBurnHeat.z * 0.03, 0.0)));
+        g_fireEmit = max(g_fireEmit, kEmberColour * (kEmberNits * 3.14159265 * 1.6 * kBuildingGlowShare * glow *
+                                                     buildingGlowByDay() * max(0.04 * lit, low * veins)));
+    }
+    return true;
+}
+
 // How much rain a surface takes: up-facing fully, vertical with run-down
 // streaks near the eye (low and soft: hulls must not stripe), undersides
 // little; sheltered by the hills' sky visibility.

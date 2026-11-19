@@ -304,8 +304,13 @@ void EngineGL33::PostCameraMeter(const PostFrame& f)
     glUseProgram(p.progMeter);
     SetInt(p.progMeter, "colorTex", 0);
     SetInt(p.progMeter, "depthTex", 2);
-    // The frame the composite reads: with the air applied when it ran.
-    BindTex(0, PostSceneTex(f)); // the frame after the Air stage (the fog or the air pass)
+    // The frame the composite reads: with the air applied when it ran. Not the
+    // fire spread's flames merged into it (MergeFireFlames): they take their
+    // own exposure (PhotoCamera.hpp FlameExposureLog2), and their light would
+    // pull the highlight guard and hold every flame under white at night.
+    PostFrame scene = f;
+    scene.flameScene = 0;
+    BindTex(0, PostSceneTex(scene)); // the frame after the Air stage (the fog or the air pass)
     BindTex(2, p.depthTex);
     // Scene light: the stored frame divided by its pre-exposure.
     Set4(p.progMeter, "meterParams", rm::kMeterSkyWeight, std::exp2(-c.preExposureLog2),

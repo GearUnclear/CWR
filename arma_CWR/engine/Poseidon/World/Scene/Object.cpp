@@ -19,6 +19,7 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/World/Simulation/FrameInv.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/Foundation/Common/Filenames.hpp>
@@ -1053,6 +1054,17 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
 {
     Shape* sShape = _shape->LevelOpaque(level);
 
+    // (followups) a burning wreck's proxies burn with it (FireSpreadWorld.hpp
+    // BeginWreckProxies; nothing while the fire is off)
+    struct WreckProxiesScope
+    {
+        bool pushed;
+        explicit WreckProxiesScope(const Object* o) : pushed(firespread::BeginWreckProxies(o)) {}
+        ~WreckProxiesScope() { firespread::EndWreckProxies(pushed); }
+        WreckProxiesScope(const WreckProxiesScope&) = delete;
+        WreckProxiesScope& operator=(const WreckProxiesScope&) = delete;
+    } wreckProxies(sShape->NProxies() > 0 ? this : nullptr);
+
     // draw all proxy objects
     for (int i = 0; i < sShape->NProxies(); i++)
     {
@@ -1400,7 +1412,8 @@ Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
 // burning wreck's black column glows at its base only. A puff inside a fire's
 // flames glows as part of them (CombatFlameEmission): that light, linear,
 // goes to `emit`, added after the particle's own colour.
-Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false)
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false,
+                        const float* plumeFire = nullptr)
 {
     const lighting::CombatLightSet& set = lighting::GCombatLights();
     // A fire's light (kept in its hue) and every other combat light (white
@@ -1408,12 +1421,22 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
     float e[3] = {0.0f, 0.0f, 0.0f};
     float o[3] = {0.0f, 0.0f, 0.0f};
     emit[0] = emit[1] = emit[2] = 0.0f;
+    // A wildfire plume's puff: its flames' light on its underside, as a fire's
+    // light on smoke (Smokes.hpp PlumePuff::PlumeLight, from every drawn flame).
+    if (plumeFire)
+        for (int i = 0; i < 3; ++i)
+            e[i] += std::max(plumeFire[i], 0.0f);
     for (const lighting::CombatLightRecord& r : set.Records())
     {
         // A fireball's glowing puff is the blast's light: a
         // detonation's light on it added the flash's white over its own glow,
         // and by night washed the fireball out to pale grey.
         if (ownGlow && r.detonation)
+            continue;
+        // A wildfire's plume takes its flames' light as its own (Smokes.hpp
+        // PlumePuff::PlumeLight, from every drawn flame), not counted twice
+        // (nor the fire spread's lights: they stand for the same flames).
+        if (plumeFire && (r.kind == lighting::CombatLightKind::Fire || r.kind == lighting::CombatLightKind::Wildfire))
             continue;
         const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
         const float d2 = dx * dx + dy * dy + dz * dz;
@@ -1513,6 +1536,14 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
         Color fireballOwn;
         bool fireball = false;
+        // A fire plume's puff (Smokes.hpp PlumePuff) lights itself: a gain on
+        // the scene's light on it and the flames' light on its underside.
+        float plumeGain[3] = {1.0f, 1.0f, 1.0f};
+        float plumeFire[3] = {0.0f, 0.0f, 0.0f};
+        bool plume = false;
+        if (render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+            if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
+                plume = puff->PlumeLight(plumeGain, plumeFire);
         // A fireball's puff (FireballPuff) glows as a hot
         // body and scatters as soot. Its shape is self-lit (MSShining): its
         // table's colour times the eye's adaptation, which the photoreal
@@ -1598,6 +1629,15 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             colorI = colorI * accom;
             if (rigLit)
                 colorI = AddParticleRigLight(colorI, rigLight, accom);
+            if (plume)
+            {
+                // A fire plume's puff: the gain on the scene's light on it, in
+                // linear light (the display colour taken back to light).
+                auto gained = [](float display, float gain)
+                { return std::pow(std::pow(std::max(display, 0.0f), 2.2f) * gain, 1.0f / 2.2f); };
+                colorI = Color(gained(colorI.R(), plumeGain[0]), gained(colorI.G(), plumeGain[1]),
+                               gained(colorI.B(), plumeGain[2]), colorI.A());
+            }
             if (combat)
             {
                 // The particle's own colour (multiplied in below) is its albedo.
@@ -1607,7 +1647,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                     const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
                 }
-                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);
+                colorI =
+                    CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball, plume ? plumeFire : nullptr);
                 for (int i = 0; i < 3; ++i)
                     flameEmit[i] += fireballEmit[i];
             }
@@ -2020,7 +2061,7 @@ DEFINE_CASTING(Object)
 
 Object::Object(LODShapeWithShadow* shape, int id)
     : _shape(shape), _static(true), _id(id), _destrType(DestructBuilding), _animatedCount(0), _inList(nullptr),
-      _destroyPhase(0), _canSmoke(true), _isDestroyed(false)
+      _destroyPhase(0), _canSmoke(true), _isDestroyed(false), _gutted(false)
 {
     // _type default to Primary type
     if (_shape && *_shape->GetName())

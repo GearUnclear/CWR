@@ -11,6 +11,8 @@
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+#include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -64,6 +66,12 @@ struct StaticCasterCache
     };
     std::vector<AlphaChunk> alphaChunks;
     std::vector<float> alphaWorld; // xyzuv world
+    // The fire spread burnt the crown away (firespread::TreeLeavesGone): built
+    // without its leaves.
+    bool leavesGone = false;
+    // The shape it was built from: a gutted house wears its burnt shell
+    // (FireBuildingShell.hpp), whose faces differ.
+    const LODShape* shape = nullptr;
     // XP-shadows casterCull: world AABB of every vertex above (only filled
     // while the cull is on).
     bool hasBounds = false;
@@ -196,6 +204,11 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // Walk one shape's faces in WORLD space, dispatching triangles to the emit
     // callbacks. Used for live (camera-relative stream) and cache (world-space
     // store) collection so both share the classification + triangulation.
+    // The fire spread's burnt-away crowns (walkSkipLeaves, set per caster):
+    // their leaves, the faces the lit shader takes as leaves (a forced
+    // diffuse: TransLight.cpp CreateMaterial), cast nothing. Always false
+    // while the fire is off.
+    bool walkSkipLeaves = false;
     auto walkShape = [&](Shape* s, const FrameBase& frame, auto&& emitSolid, auto&& emitAlpha)
     {
         for (Offset o = s->BeginFaces(); o < s->EndFaces(); s->NextFace(o))
@@ -205,6 +218,14 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             if (mode == sm::CasterMode::Skip)
             {
                 continue;
+            }
+            if (walkSkipLeaves)
+            {
+                const int m = f.GetMaterial(*s);
+                if (m == MSHalfLighted || m == MSFullLighted || m == MSInside || m == MSInside75 || m == MSInside50)
+                {
+                    continue;
+                }
             }
             Texture* tex = f.GetTexture();
             if (mode == sm::CasterMode::AlphaTest && !tex)
@@ -279,6 +300,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     {
         e.obj = obj;
         e.geomLOD = geomLOD;
+        e.leavesGone = walkSkipLeaves;
+        e.shape = obj->GetShape();
         e.pos = obj->Position();
         e.dir = obj->Direction();
         e.solidWorld.clear();
@@ -450,11 +473,13 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             xpMin[0] = xpMin[1] = xpMin[2] = 3.0e38f;
             xpMax[0] = xpMax[1] = xpMax[2] = -3.0e38f;
         }
+        walkSkipLeaves = Poseidon::firespread::TreeLeavesGone(oi->object);
         if (oi->object->Static())
         {
             StaticCasterCache& e = s_staticCasterCache[oi->object];
             if (e.obj != oi->object || e.geomLOD != geomLOD || (e.pos - oi->object->Position()).SquareSize() != 0 ||
-                (e.dir - oi->object->Direction()).SquareSize() != 0)
+                (e.dir - oi->object->Direction()).SquareSize() != 0 || e.leavesGone != walkSkipLeaves ||
+                e.shape != oi->object->GetShape())
             {
                 buildStaticEntry(e, oi->object, geomLOD, s);
                 censusRebuilds++;
@@ -469,6 +494,7 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         {
             collectShape(s, fb);
         }
+        walkSkipLeaves = false; // the proxies are not the tree
 
         // Proxies (the soldier's weapon, vehicle crew, ...) cast from their
         // substituted model — the parent holds only an IsHiddenProxy placeholder

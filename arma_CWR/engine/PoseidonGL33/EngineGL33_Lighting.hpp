@@ -110,6 +110,44 @@ extern const char kPostFogGlowMainGLSL[];
 // a copy of its own (today the fragment prelude).
 const char* LitConstantsBlock();
 
+// The fire spread's flame sheets (POSEIDON_XP_FIRESPREAD;
+// EngineGL33_FireFlameShaders.cpp holds them, EngineGL33_FireFlames.cpp draws
+// them): the instanced vertex shader and the flame's fragment shader, which
+// pastes LitConstantsBlock() and kCameraCodecGLSL, each as the flipbook
+// variant (`flipbook`: the simulated flames' physical fields,
+// tools/firespread/flame_<style>.png) or the procedural fallback. Override
+// stems vsFireFlames / psFireFlames and vsFireFlamesBook / psFireFlamesBook.
+const char* FireFlameVertexSource(bool flipbook);
+const char* FireFlameFragmentSource(bool flipbook);
+// The flames' merge into the frame in the post pass (the linear flame target
+// onto the decoded frame), a fragment shader for the post vertex shader
+// (PostShaderSource(PostShader::Vertex)). Override stem psFireFlamesMerge.
+const char* FireFlameMergeSource();
+// The flames' depth for the smoke drawn after them (a fragment shader for the
+// post vertex shader). Override stem psFireFlamesCoverDepth.
+const char* FireFlameCoverDepthSource();
+// The fire spread's sparks (EngineGL33_FireSparkShaders.cpp holds them,
+// EngineGL33_FireSparks.cpp draws them): the instanced streak quad's vertex
+// shader and the glow's fragment shader (pastes LitConstantsBlock() and
+// kCameraCodecGLSL). Override stems vsFireSparks / psFireSparks.
+const char* FireSparkVertexSource();
+const char* FireSparkFragmentSource();
+// The units the flame draw binds its own inputs to, around its draw only:
+// the flipbook's texture array and the scene's depth (its soft fade), and
+// the far book (fix 08). Past every unit the world programs use, with no
+// sampler object on any.
+constexpr int kFlameBookUnit = 18;
+constexpr int kFlameDepthUnit = 19;
+constexpr int kFlameFarUnit = 20;
+// The far book's texel (fix 08; EngineGL33_FireFlameShaders.cpp, beside the
+// flame's shader whose fields it must match) from one of the flipbook's (R
+// the soot's temperature, G its optical depth, 0..255): rgba the luminous
+// zone, the zone times its luminance relative to a 1650 K body's, its cover
+// and the soot outside it, all linear in what they make on screen, so the
+// far book's mips keep a far tongue's light (the flipbook's average its
+// kelvin with the air before the zone's threshold: the realism audit's C13).
+void FlameFarTexel(unsigned char r, unsigned char g, float out[4]);
+
 // The post-pass shaders (EngineGL33_PostShaders.cpp; EngineGL33_PostFX.cpp
 // runs the passes), each assembled from its pieces.
 enum class PostShader : int
@@ -226,6 +264,16 @@ constexpr int kGroundFieldUnit = 12;
 // everywhere, and the program's sampler count stays within the 16 a fragment
 // stage is guaranteed. Bound only around a batched draw.
 constexpr int kDecalLayerUnit = 16;
+// The fire spread's scorched ground (POSEIDON_XP_FIRESPREAD,
+// World/Simulation/FireSpreadWorld.hpp GetBurnMap): an R32F atlas whose
+// first rows are the world-space burn map (0 untouched to 1 burnt black) and
+// whose rows after them hold the land's height grid under the same window
+// (litBurnGround), read by the land, grass and object mains (each stays
+// within 16 samplers; the sea's does not declare it) while litBurnRect.w is
+// 1. Like the decal array it sits past the 16 fragment units, on a unit
+// nothing else binds; a black stand-in from init on, the atlas once the fire
+// has burnt.
+constexpr int kBurnMapUnit = 17;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
@@ -320,6 +368,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
     {"decalLayers", kDecalLayerUnit},        // the decal batch's texture array (W4-1)
+    {"burnMap", kBurnMapUnit},               // the fire spread's scorched ground (land, grass and objects)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -444,8 +493,32 @@ enum : int
     // before): x 0 (the lane's window glow, not brought over), y the light
     // bounce's gain, z 1 while the combat shadow mask traces street lamps, w 0.
     XpNight = 92,
-    Count = 93,
+    // The fire spread's scorched ground (POSEIDON_XP_FIRESPREAD; zero while
+    // it is off or nothing has burnt, which leaves every fragment as before):
+    // xy the burn map's south-west corner (m), z 1 / its extent (1/m), w 1
+    // while the map is bound on kBurnMapUnit.
+    BurnRect = 93,
+    // The same atlas's layout (zero with BurnRect): x the burn rows' share of
+    // its height, y the height grid's size in texels (0 = none; its rows
+    // start where the burn rows end), z 1 / its width, w 1 / its height.
+    BurnGround = 94,
+    // The firelight's heat grids in the same atlas (zero with BurnRect;
+    // EngineGL33_Lighting.cpp BuildFireHeat): x their size in texels (0 =
+    // none; the ember grid in its first columns, the halo grid in the next as
+    // many), y the v of their first row, z the fire's clock (s, wrapped), w 0.
+    BurnHeat = 95,
+    // The fire spread's plume shadow on the sun (FireSpreadWorld.hpp
+    // GetPlumeShadow; zero while there is no plume, which leaves every
+    // fragment as before): x the blobs in PlumeShadow (0 = none), y the gain
+    // on their optical depth, zw 0.
+    PlumeInfo = 96,
+    // Two slots a blob (PlumeShadowSlots): xy its middle (world x, z), z its
+    // height (world y), w its vertical optical depth; then x its sigma along
+    // the wind, y across it (m), zw the wind's direction (x, z).
+    PlumeShadow = 97,
+    Count = 113,
 };
+constexpr int PlumeShadowSlots = 16;
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
 constexpr int SurfaceShCount = 6;
@@ -472,7 +545,12 @@ static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
 static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
 static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
-static_assert(Count == XpNight + 1, "LitConst size out of sync");
+static_assert(BurnRect == XpNight + 1, "the scorched ground's slot follows the xp-nightlight slot");
+static_assert(BurnGround == BurnRect + 1, "the scorched ground's atlas layout follows its rectangle");
+static_assert(BurnHeat == BurnGround + 1, "the firelight's heat grids follow the atlas layout");
+static_assert(PlumeInfo == BurnHeat + 1, "the plume shadow's slot follows the firelight's");
+static_assert(PlumeShadow == PlumeInfo + 1, "the plume shadow's blobs follow its info slot");
+static_assert(Count == PlumeShadow + PlumeShadowSlots, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

@@ -1171,8 +1171,10 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(decal.find("if (combat &&") != std::string::npos);
     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
           std::string::npos);
-    // A fireball's glowing puff takes no detonation light.
-    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);") !=
+    // A fireball's glowing puff takes no detonation light; a wildfire plume's
+    // puff takes no fire light (its own, PlumePuff::PlumeLight).
+    CHECK(decal.find(
+              "CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball, plume ? plumeFire : nullptr);") !=
           std::string::npos);
     // A puff's colour comes under one by its peak (no
     // clipped white column) and the light past it goes to the decal's glow.
@@ -1185,6 +1187,10 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(litParticle.find("lighting::CombatParticleMix(base, e, o,") != std::string::npos);
     // A detonation's light keeps its hue on smoke as a fire's.
     CHECK(litParticle.find("r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o") != std::string::npos);
+    // The fire spread's lights do not light its plume (the plume lights itself).
+    CHECK(litParticle.find(
+              "r.kind == lighting::CombatLightKind::Fire || r.kind == lighting::CombatLightKind::Wildfire))") !=
+          std::string::npos);
     CHECK(litParticle.find("if (ownGlow && r.detonation)") != std::string::npos);
     CHECK(litParticle.find("lighting::CombatFlameEmission(r.kind, r.sample, d, flame);") != std::string::npos);
     // The frame's list keeps the steady lights past the twelve, and a fire's
@@ -1355,4 +1361,83 @@ TEST_CASE("Combat lights: blasts take their round's charge, craters their column
     set.Tick(0.2f);
     set.Tick(0.25f);
     CHECK(set.Find(id) == nullptr);
+}
+
+TEST_CASE("Combat lights: the fire spread's light is its flames' candela, physical against the sky",
+          "[remaster][CombatLights]")
+{
+    // By day and to sunset the light is on the rig's physical scale; under
+    // the game's night floor it is raised by the floor over the real sky, to
+    // the cap by nautical twilight; never less as the sun sinks.
+    CHECK(WildfireLightGain(30.0f, true, 0.0f) == Approx(1.0f));
+    CHECK(WildfireLightGain(0.0f, true, 0.0f) == Approx(1.0f));
+    CHECK(WildfireLightGain(-3.0f, true, 0.5f) > 1.5f);
+    CHECK(WildfireLightGain(-3.0f, true, 0.5f) < 5.0f);
+    CHECK(WildfireLightGain(-6.0f, true, 1.0f) == Approx(kWildfireSkyFloorLux / 3.39f).epsilon(0.05));
+    CHECK(WildfireLightGain(-12.0f, true, 1.0f) == Approx(kWildfireNightBoost));
+    float prev = 0.0f;
+    for (float e = 10.0f; e >= -20.0f; e -= 0.25f)
+    {
+        const float g = WildfireLightGain(e, true, 1.0f);
+        CHECK(g >= prev - 1e-4f);
+        prev = g;
+    }
+    // The camera's headroom over its night caps it (never brighter on
+    // screen at dusk than at night): 9 times at 8 degrees under.
+    CHECK(WildfireLightGain(-8.0f, true, 0.5f, 9.0f) == Approx(kWildfireNightBoost / 9.0f));
+    CHECK(WildfireLightGain(-8.0f, true, 0.5f, 9.0f) < WildfireLightGain(-8.0f, true, 0.5f));
+    CHECK(WildfireLightGain(-12.0f, true, 1.0f, 1.0f) == Approx(kWildfireNightBoost));
+    CHECK(WildfireLightGain(5.0f, true, 0.0f, 64.0f) == Approx(1.0f));
+    CHECK(WildfireTwilightLux(0.0f) == Approx(400.0f).epsilon(0.02));
+    CHECK(WildfireTwilightLux(-6.0f) == Approx(3.39f).epsilon(0.02));
+    // Without the photoreal camera, the classic night's share of the boost.
+    CHECK(WildfireLightGain(-20.0f, false, 0.0f) == Approx(1.0f));
+    CHECK(WildfireLightGain(-20.0f, false, 1.0f) == Approx(kWildfireNightBoost));
+    // A steady light of its owner's: never finishes, kept in the frame's list.
+    CHECK(CombatLightIsSteady(CombatLightKind::Wildfire));
+    CHECK_FALSE(CombatLightIsBurst(CombatLightKind::Wildfire));
+    CHECK(std::string(CombatLightKindName(CombatLightKind::Wildfire)) == "wildfire");
+    // Its power: the candela on the rig's scale times the gain, the deep
+    // orange of soot at 1450 K (green under a fifth of red, no blue).
+    CombatTuning night;
+    night.wildfire = 500.0f;
+    const CombatLightSample s = EvaluateCombatLight(CombatLightKind::Wildfire, 750000.0f, 3.0f, 7, night);
+    CHECK(s.intensity * s.core * s.core == Approx(750000.0f * kWildfireRigPerLux * 500.0f).epsilon(1e-4));
+    CHECK(s.rgb[1] < 0.2f * s.rgb[0]);
+    CHECK(s.rgb[2] < 0.02f * s.rgb[0]);
+    // The set: its owner's shape, and its day and night from the tuning, not
+    // the classic day scale.
+    CombatLightSet set;
+    const float p[3] = {10.0f, 2.0f, 30.0f};
+    const std::uint32_t id = set.Create(CombatLightKind::Wildfire, p, 100000.0f);
+    set.SetShape(id, 12.0f, 2500.0f, 16.0f);
+    CombatTuning day;
+    set.Evaluate(day, 0.0f);
+    const CombatLightRecord* r = set.Find(id);
+    REQUIRE(r != nullptr);
+    CHECK(r->sample.core == Approx(12.0f));
+    CHECK(r->sample.range == Approx(2500.0f));
+    CHECK(r->spread == Approx(16.0f));
+    CHECK(r->sample.intensity * 144.0f == Approx(100000.0f * kWildfireRigPerLux).epsilon(1e-4));
+    // A fire's light on its smoke as a fire's: the soot drinks it.
+    CHECK(CombatSmokeTransmittance(CombatLightKind::Wildfire, r->sample, 100.0f, 0.1f) < 0.5f);
+}
+
+TEST_CASE("Combat lights: the fire spread's lights carry their spread in the light block",
+          "[remaster][CombatLights][FrameLights]")
+{
+    std::vector<FrameLight> lights(2);
+    lights[0].hdr = true;
+    lights[0].range = 900.0f;
+    lights[0].spread = 16.0f;
+    lights[1].hdr = true;
+    lights[1].range = 40.0f;
+    std::vector<float> texels;
+    PackFrameLights(lights, texels);
+    CHECK(texels[8] == 900.0f);
+    CHECK(texels[10] == 16.0f);
+    CHECK(texels[11] == 0.0f);
+    // Every other combat light keeps 0 there (the shaders' cosine as before).
+    CHECK(texels[kTexelsPerLight * 4 + 10] == 0.0f);
+    CHECK(texels[kTexelsPerLight * 4 + 11] == 0.0f);
 }

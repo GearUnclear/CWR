@@ -25,6 +25,8 @@
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -44,7 +46,7 @@ namespace
 struct SurfClassProgram
 {
     int loc = -2;
-    float v[3] = {-1.0f, -1.0f, -1.0f};
+    float v[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
 };
 std::vector<SurfClassProgram> s_surfClassPrograms;
 } // namespace
@@ -185,7 +187,11 @@ void EngineGL33::ResetSurfaceClassPrograms()
 
 void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d)
 {
-    if (!_surfBoundProgram || !_lightingActive || !_remasterPrograms || !_featureGates[rm::Feature::Surfaces].on)
+    // The fire spread's char (_burnDraws, POSEIDON_XP_FIRESPREAD) reads the
+    // class too, with the surfaces switch off; every other read of it is
+    // behind litSurface.x, so the extra writes change nothing else.
+    if (!_surfBoundProgram || !_lightingActive || !_remasterPrograms ||
+        (!_featureGates[rm::Feature::Surfaces].on && !_burnDraws))
         return;
     // The materials step's classes (SurfaceMaterials.hpp: the texture's name
     // and the drawing object's kind, classified once per texture and kind and
@@ -197,15 +203,35 @@ void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::Ren
     const rm::SurfaceClass cls = tex ? tex->SurfaceClassFor(_surfaceTable, _surfaceTableGen, d.objectKind, onSurface)
                                      : rm::KindDefaultClass(d.objectKind, onSurface);
     const bool blend = tex && tex->GetAlphaClass() == Poseidon::AlphaStats::Blend;
-    const float v[3] = {static_cast<float>(cls), static_cast<float>(d.objectKind), blend ? 1.0f : 0.0f};
+    // w: the fire spread's char class (0 while its atlas is not bound): 2 a
+    // tree, bush or forest block (trunks char whole once burnt out, leaves
+    // burn away), 1 another static object (soot from the ground up), 0 never
+    // charred (men, weapons, decals lying on the ground, a vehicle the fire
+    // does not burn); (followups) 3 and above a wreck the fire burns, its char
+    // and its shell's glow packed after the 3 (FireSpreadWorld.hpp
+    // WreckBurnClass; the object main's burnWreck).
+    float burnClass = 0.0f;
+    float charK = 0.0f, glow = 0.0f;
+    if (_burnDraws && !onSurface && Poseidon::firespread::DrawingWreck(charK, glow))
+    {
+        // its glow's light as the ground's embers' (pi L lux on a white
+        // surface's 1.6, on the fire's light's scale with the night's gain)
+        namespace fs = Poseidon::firespread;
+        const float rig = Poseidon::lighting::kWildfireRigPerLux *
+                          std::max(Poseidon::lighting::GCombatLights().Tuning().wildfire, 0.0f);
+        burnClass = fs::WreckBurnClass(charK, glow, fs::WreckGlowNits(glow) * fs::WreckGlowTestScale() * 3.14159265f * 1.6f * rig);
+    }
+    else if (_burnDraws && !onSurface && d.objectKind == Poseidon::render::DrawObjectKind::Static)
+        burnClass = Poseidon::firespread::DrawingVegetation() ? 2.0f : 1.0f;
+    const float v[4] = {static_cast<float>(cls), static_cast<float>(d.objectKind), blend ? 1.0f : 0.0f, burnClass};
     if (_surfBoundProgram >= s_surfClassPrograms.size())
         s_surfClassPrograms.resize(_surfBoundProgram + 64);
     SurfClassProgram& sp = s_surfClassPrograms[_surfBoundProgram];
     if (sp.loc == -2)
         sp.loc = glGetUniformLocation(_surfBoundProgram, "surfClass");
-    if (sp.loc < 0 || (v[0] == sp.v[0] && v[1] == sp.v[1] && v[2] == sp.v[2]))
+    if (sp.loc < 0 || (v[0] == sp.v[0] && v[1] == sp.v[1] && v[2] == sp.v[2] && v[3] == sp.v[3]))
         return;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         sp.v[i] = v[i];
-    glUniform4f(sp.loc, v[0], v[1], v[2], 0.0f);
+    glUniform4f(sp.loc, v[0], v[1], v[2], v[3]);
 }

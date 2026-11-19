@@ -99,6 +99,15 @@ void EngineGL33::SetTaaJitterState(rm::TaaOffset ndc, float bias)
 
 void EngineGL33::BeginTranslucentObjects()
 {
+    CopyOpaqueForTaa();
+    // The fire spread's flame sheets (POSEIDON_XP_FIRESPREAD) are the first
+    // translucent draw: after the TAA's copy, so its particle mask sees them
+    // as particles; a no-op while the fire has no flames.
+    DrawFireFlames();
+}
+
+void EngineGL33::CopyOpaqueForTaa()
+{
     // Once, in a TAA frame's world pass, and only into targets that already
     // exist at this size (creating them here would reset the viewport of a
     // cropped world pass; the post pass creates them at the end of the frame).

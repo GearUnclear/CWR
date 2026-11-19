@@ -193,6 +193,38 @@ TEST_CASE("SpecToPassId: priority order is correct", "[Graphics][GL33]")
 
 // FrameState / PassState / DrawItem UBO Alignment Tests
 
+TEST_CASE("FrameState: SameFrameState tells a moved camera, fog or sun apart", "[Graphics][GL33]")
+{
+    // (smoketrim) EngineGL33::BeginPass keeps the world pass's set-up when it
+    // is entered again in the same frame with the same frame state: every
+    // field it is built from must count.
+    FrameState a;
+    a.view._11 = 1.0f;
+    a.projection._22 = 1.5f;
+    a.cameraPos[0] = 100.0f;
+    a.fogParams[0] = 50.0f;
+    a.fogColor[1] = 0.5f;
+    a.sunDir[1] = -0.7f;
+    a.sunEnabled = true;
+    const FrameState b = a;
+    CHECK(SameFrameState(a, b));
+    auto differs = [&](auto change)
+    {
+        FrameState c = a;
+        change(c);
+        return !SameFrameState(a, c);
+    };
+    CHECK(differs([](FrameState& c) { c.view._13 = 0.1f; }));
+    CHECK(differs([](FrameState& c) { c.projection._11 = 2.0f; }));
+    CHECK(differs([](FrameState& c) { c.viewProjection._44 = 2.0f; }));
+    CHECK(differs([](FrameState& c) { c.cameraPos[2] = 1.0f; }));
+    CHECK(differs([](FrameState& c) { c.viewport[2] = 1920.0f; }));
+    CHECK(differs([](FrameState& c) { c.fogParams[1] = 0.01f; }));
+    CHECK(differs([](FrameState& c) { c.fogColor[0] = 0.2f; }));
+    CHECK(differs([](FrameState& c) { c.sunDir[0] = 0.3f; }));
+    CHECK(differs([](FrameState& c) { c.sunEnabled = false; }));
+}
+
 TEST_CASE("FrameState: matrices at start for UBO upload", "[Graphics][GL33]")
 {
     REQUIRE(offsetof(FrameState, view) == 0);

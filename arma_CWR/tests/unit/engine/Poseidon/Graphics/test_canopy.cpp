@@ -611,11 +611,11 @@ TEST_CASE("GpuTimings: the canopy map's build has its own section on the frames 
 {
     using namespace Poseidon::gpu;
     std::uint64_t stamps[kMarkCount] = {};
-    std::uint32_t recorded = 0;
+    std::uint64_t recorded = 0;
     auto set = [&](Mark m, double ms)
     {
         stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(ms * 1e6);
-        recorded |= 1u << static_cast<int>(m);
+        recorded |= 1ull << static_cast<int>(m);
     };
     set(Mark::FrameBegin, 0.0);
     set(Mark::CanopyBegin, 0.1);
@@ -629,9 +629,9 @@ TEST_CASE("GpuTimings: the canopy map's build has its own section on the frames 
     CHECK(t.LastMs(Section::World) == Approx(3.0).margin(1e-3));
     CHECK(t.Summary().find(" | canopy 0.80") != std::string::npos);
     // A frame that does not rebuild records no canopy section.
-    recorded &= ~(1u << static_cast<int>(Mark::CanopyBegin));
-    recorded &= ~(1u << static_cast<int>(Mark::CanopyEnd));
+    recorded &= ~(1ull << static_cast<int>(Mark::CanopyBegin));
+    recorded &= ~(1ull << static_cast<int>(Mark::CanopyEnd));
     t.Submit(stamps, recorded);
     CHECK(t.LastMs(Section::Canopy) < 0.0f);
-    CHECK(kMarkCount <= 32);
+    CHECK(kMarkCount <= 64);
 }

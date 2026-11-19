@@ -96,6 +96,11 @@ struct FrameLight
     // `range` the window end; `ambient` and `sortBrightness` are unused.
     bool hdr = false;
     float range = 0.0f;
+    // A combat light of the fire spread (CombatLights.hpp, kind Wildfire):
+    // the surface cosine's horizontal spread (m, at least 0.01 for its fast branch;
+    // 0 for every other light: the cosine of the ball `start` from the
+    // light's centre).
+    float spread = 0.0f;
 
     bool IsSpot() const { return kind == FrameLightKind::Spot && !hdr; }
 };
@@ -192,7 +197,8 @@ int TileLightsAt(const TileGrid& grid, int px, int py, int out[kMaxLightsPerTile
 //   1: rgb diffuse, w 1 for a spotlight (the per-draw litLightColor layout),
 //      2 for a combat light (rgb its linear radiance at the core)
 //   2: rgb ambient, w sort brightness (the classic budget's ranking); a combat
-//      light: x its range, y its shadow mask channel + 1 (0 = none)
+//      light: x its range, y its shadow mask channel + 1 (0 = none), z its
+//      spread (FrameLight::spread; 0 but for the fire spread's), w 0
 //   3: xyz beam direction, w kind
 void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& texels);
 

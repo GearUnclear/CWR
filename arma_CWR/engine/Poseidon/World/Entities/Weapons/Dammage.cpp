@@ -13,6 +13,8 @@
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/Network/Network.hpp>
+#include <Poseidon/World/Simulation/FireShell.hpp>
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #include <Poseidon/Dev/Debug/DebugCheats.hpp>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -237,6 +239,21 @@ void Object::DoDammage(EntityAI* owner, Vector3Par pos, float val, float valRang
     {
         RptF("Dammaged shot %s", (const char*)GetDebugName());
     }
+    // (end-state agent) the fire guts it (GutByFire): on every machine the
+    // same shell, no stock crumple; with the fire lane off a plain kill
+    if (ammo.GetLength() > 0 && strcmp((const char*)ammo, firespread::kShellAmmo) == 0)
+    {
+        if (firespread::Enabled() && !_gutted)
+        {
+            _gutted = true;
+            firespread::ShellGut(this);
+        }
+        if (!IsDammageDestroyed())
+        {
+            SetDammage(1.0f);
+        }
+        return;
+    }
 
     if (GWorld)
     {
@@ -408,6 +425,25 @@ void Object::SetTotalDammageValue(float val)
     }
 }
 
+void Object::GutByFire()
+{
+    // as LocalDammage does for a static object's hit: done here and sent to
+    // every machine (the ammo's name says it is the fire's gutting)
+    const RString name(firespread::kShellAmmo);
+    if (IsLocal())
+    {
+        DoDammage(nullptr, VZero, 1.0f, -1.0f, name);
+        if (GetNetworkId().creator == 1)
+        {
+            GetNetworkManager().AskForDammage(this, nullptr, VZero, 1.0f, -1.0f, name);
+        }
+    }
+    else
+    {
+        GetNetworkManager().AskForDammage(this, nullptr, VZero, 1.0f, -1.0f, name);
+    }
+}
+
 void Object::SetDammageNetAware(float dammage)
 {
     if (IsLocal())
@@ -461,6 +497,12 @@ void Object::SetDammage(float dammage)
         _canSmoke = true;
         _isDestroyed = false;
         SetDestroyPhase(0);
+        // (end-state agent) a gutted one repaired: its own shape again
+        if (_gutted)
+        {
+            _gutted = false;
+            firespread::ShellUngut(this);
+        }
     }
 }
 
@@ -535,6 +577,12 @@ void Object::Repair(float ammount)
     }
     _isDestroyed = false;
     SetDestroyPhase(0);
+    // (end-state agent) a gutted one repaired: its own shape again
+    if (_gutted && tot < 1.0f)
+    {
+        _gutted = false;
+        firespread::ShellUngut(this);
+    }
 }
 
 void Object::HitBy(EntityAI* killer, float howMuch, RString ammo) {}
@@ -546,6 +594,11 @@ bool Object::IsDammageDestroyed() const
 
 void Object::Destroy(EntityAI* owner, float overkill, float minExp, float maxExp)
 {
+    // (end-state agent) a gutted building stands as its shell: no crumple
+    if (_gutted)
+    {
+        return;
+    }
     // start destruction
     Vector3Val com = _shape->CenterOfMass();
     float objSize = GetRadius();
@@ -627,6 +680,7 @@ DEF_RSB(destroyed)
 DEF_RSB(destroyPhase)
 DEF_RSB(dammage)
 DEF_RSB(scriptVars)
+DEF_RSB(gutted)
 
 LSError Object::Serialize(ParamArchive& ar)
 {
@@ -664,6 +718,17 @@ LSError Object::Serialize(ParamArchive& ar)
     // setVariable/getVariable bank; SRef serialization skips a null bank on
     // save and leaves it null when the entry (or version) is absent on load
     PARAM_CHECK(ar.Serialize(RSB(scriptVars), _scriptVars, 14))
+
+    // (end-state agent) gutted by the fire: its shell again after a load
+    {
+        bool gutted = _gutted;
+        PARAM_CHECK(ar.Serialize(RSB(gutted), gutted, 1, false))
+        _gutted = gutted;
+    }
+    if (!ar.IsSaving() && _gutted)
+    {
+        firespread::ShellGut(this);
+    }
 
     return LSOK;
 }

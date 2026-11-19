@@ -418,6 +418,17 @@ void EngineGL33::EmitDraw(const Poseidon::render::frame::Draw& d)
         glDrawElements(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(offsetBytes));
     }
     ++Poseidon::gPerfDrawCalls;
+    // Smoke in front of the fire spread's flames dims them too (a no-op
+    // unless this frame drew flames into their linear target).
+    if (FlameCoverWanted() && BeginFireFlameCover())
+    {
+        if (_instCount > 1)
+            glDrawElementsInstanced(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(offsetBytes),
+                                    _instCount);
+        else
+            glDrawElements(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(offsetBytes));
+        EndFireFlameCover();
+    }
 }
 
 void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)

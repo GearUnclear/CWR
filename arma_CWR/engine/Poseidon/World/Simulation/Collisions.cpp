@@ -35,6 +35,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp> // ambient-traffic danger hook (TrafficNotifyExplosionFast)
+#include <Poseidon/World/Simulation/FireSpreadWorld.hpp>
 #define PROFILE_COLLISIONS 1
 
 #if PROFILE_COLLISIONS
@@ -988,7 +989,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
             GLOB_WORLD->AddAnimal(crater);
         }
     }
-    else
+    else if (!firespread::InWreckBlast()) // (fire-objects: a wreck's own blast digs no crater)
     {
         float maxY = floatMax(type->indirectHitRange * 2, 0.5);
         float surfY = RoadSurfaceY(pos);
@@ -1108,6 +1109,8 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
             veh->AddImpulseNetAware(force, forcePos.CrossProduct(force));
         }
     }
+    // A burst in dry grass can start a fire (FIRE-SPREAD; no-op when off).
+    firespread::NotifyExplosion(pos, type->indirectHit, type->indirectHitRange);
     const float maxRadius = type->indirectHitRange * 4;
     const float hit = type->indirectHit;
     int xMin, xMax, zMin, zMax;
@@ -1817,7 +1820,7 @@ float Landscape::Visible(Vector3Par from, Vector3Par to, float toRadius, const O
 
         if (minVis < 1e-3)
         {
-            return minVis;
+            return minVis * firespread::SmokeSight(from, to);
         }
     }
 
@@ -1908,7 +1911,7 @@ float Landscape::Visible(Vector3Par from, Vector3Par to, float toRadius, const O
         }
     }
 
-    return minVis * context.objVis;
+    return minVis * context.objVis * firespread::SmokeSight(from, to);
 }
 
 void Landscape::IsInside(StaticArrayAuto<OLink<Object>>& objects, Object* ignore, Vector3Par pos, ObjIntersect isect)
